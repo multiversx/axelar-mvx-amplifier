@@ -68,9 +68,23 @@ Contract address: axelar1mh5cjw2nlx495jl65cv49scnljryhwud6rhm7sxrwndvwf7nj2fssqu
 
 
 # Axelar GMP contracts
-- compile with:
+- compile with (make sure you have Rust version 1.73.0 nightly or later):
 
-`RUSTFLAGS='-C link-arg=-s' cargo wasm --locked --workspace --exclude ampd`
+Add required target: `rustup target add wasm32-unknown-unknown`
+
+Make sure you also have clang (libclang) installed: `sudo apt-get install -y clang`
+
+`cargo wasm`
+
+`RUSTFLAGS='-C link-arg=-s' cargo wasm`
+
+Run unit tests:
+
+`cargo unit-test`
+
+Only for specific package:
+
+`cargo unit-test --package multisig-prover --tests`
 
 Optimize compile with:
 ```

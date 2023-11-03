@@ -1,5 +1,6 @@
 mod abi;
 mod bcs;
+mod mvx;
 
 use axelar_wasm_std::operators::Operators;
 use cosmwasm_schema::cw_serde;
@@ -20,6 +21,7 @@ use crate::{
 pub enum Encoder {
     Abi,
     Bcs,
+    Mvx,
 }
 
 fn make_command(msg: Message, encoding: Encoder) -> Result<Command, ContractError> {
@@ -38,6 +40,12 @@ fn make_command(msg: Message, encoding: Encoder) -> Result<Command, ContractErro
                 msg.destination_address.to_string(),
                 &msg.payload_hash,
             )?,
+            Encoder::Mvx => mvx::command_params(
+                msg.cc_id.chain.to_string(),
+                msg.source_address.to_string(),
+                msg.destination_address.to_string(),
+                &msg.payload_hash,
+            )?,
         },
         id: command_id(msg.cc_id.to_string()),
     })
@@ -50,6 +58,7 @@ fn make_transfer_operatorship(
     let params = match encoding {
         Encoder::Abi => abi::transfer_operatorship_params(&worker_set),
         Encoder::Bcs => bcs::transfer_operatorship_params(&worker_set),
+        Encoder::Mvx => bcs::transfer_operatorship_params(&worker_set), // TODO:
     }?;
     Ok(Command {
         ty: CommandType::TransferOperatorship,
@@ -112,6 +121,7 @@ impl CommandBatch {
         match self.encoder {
             Encoder::Abi => abi::msg_digest(self),
             Encoder::Bcs => bcs::msg_digest(self),
+            Encoder::Mvx => bcs::msg_digest(self), // TODO:
         }
     }
 
@@ -123,6 +133,7 @@ impl CommandBatch {
         match self.encoder {
             Encoder::Abi => abi::encode_execute_data(self, quorum, signers),
             Encoder::Bcs => bcs::encode_execute_data(self, quorum, signers),
+            Encoder::Mvx => bcs::encode_execute_data(self, quorum, signers), // TODO
         }
     }
 }
@@ -138,6 +149,7 @@ impl Data {
         match encoder {
             Encoder::Abi => abi::encode(self),
             Encoder::Bcs => bcs::encode(self),
+            Encoder::Mvx => bcs::encode(self), // TODO
         }
     }
 }
@@ -151,6 +163,7 @@ pub fn make_operators(worker_set: WorkerSet, encoder: Encoder) -> Operators {
     match encoder {
         Encoder::Abi => abi::make_operators(worker_set),
         Encoder::Bcs => bcs::make_operators(worker_set),
+        Encoder::Mvx => bcs::make_operators(worker_set), // TODO
     }
 }
 
@@ -206,6 +219,21 @@ mod test {
                 .unwrap()
         );
         assert_eq!(res.ty, CommandType::ApproveContractCall);
+
+        let mut router_message = router_message.to_owned();
+        router_message.destination_address = "FF".repeat(32).parse().unwrap();
+        let res = make_command(router_message.to_owned(), Encoder::Mvx);
+        assert!(res.is_ok());
+
+        let res = res.unwrap();
+
+        assert_eq!(
+            res.id,
+            HexBinary::from_hex("3ee2f8af2201994e3518c9ce6848774785c2eef3bdbf9f954899497616dd59af")
+                .unwrap()
+        );
+        assert_eq!(res.ty, CommandType::ApproveContractCall);
+        // assert_eq!(res.params.to_hex(), "FF");
     }
 
     #[test]

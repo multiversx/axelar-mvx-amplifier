@@ -7495,6 +7495,7 @@ dependencies = [
  "itertools 0.11.0",
  "k256 0.13.1",
  "multisig",
+ "multiversx-sc-codec",
  "report",
  "schemars",
  "serde",
@@ -7503,6 +7504,15 @@ dependencies = [
  "sha3 0.10.8",
  "thiserror",
  "voting-verifier",
+]
+
+[[package]]
+name = "multiversx-sc-codec"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f1e15b46c17b87c0c7cdd79b041a4abd7f3a2b45f3c993f6ce38c0f233e82b6"
+dependencies = [
+ "arrayvec 0.7.4",
 ]
 
 [[package]]
