@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 #[cw_serde]
 #[serde(try_from = "std::string::String")]
+#[derive(Eq, Hash)]
 pub struct String(std::string::String);
 
 impl TryFrom<std::string::String> for String {
@@ -46,6 +47,12 @@ impl Deref for String {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<String> for crate::nonempty::Vec<u8> {
+    fn from(value: String) -> Self {
+        value.0.into_bytes().try_into().expect("cannot be empty")
     }
 }
 

@@ -26,7 +26,7 @@ b--GetSigningSession-->m
 ```mermaid
 sequenceDiagram
 participant Relayer
-box Axelar
+box LightYellow Axelar
 participant Prover
 participant Multisig
 end
@@ -60,6 +60,12 @@ pub enum ExecuteMsg {
     SubmitSignature {
         session_id: Uint64,
         signature: HexBinary,
+    },
+    AuthorizeCaller {
+        contract_address: Addr,
+    },
+    UnauthorizeCaller {
+        contract_address: Addr,
     },
 }
 
@@ -101,6 +107,14 @@ pub enum Event {
     // Emitted when a signing session was completed
     SigningCompleted {
         session_id: Uint64,
+    },
+    // Emitted when a StartSigningSession caller is authorized
+    CallerAuthorized {
+        contract_address: Addr,
+    },
+    // Emitted when a StartSigningSession caller is unauthorized
+    CallerUnauthorized {
+        contract_address: Addr,
     },
 }
 ```

@@ -72,7 +72,9 @@ pub struct Key {
 #[cw_serde]
 pub enum MultisigState {
     Pending,
-    Completed,
+    Completed {
+        completed_at: u64, // block at which the session was completed
+    },
 }
 
 const MESSAGE_HASH_LEN: usize = 32;
@@ -95,7 +97,7 @@ impl TryFrom<HexBinary> for MsgToSign {
 mod tests {
     use cosmwasm_std::to_binary;
 
-    use crate::test::common::test_data;
+    use crate::test::common::ecdsa_test_data;
 
     use super::*;
 
@@ -113,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_try_from_hexbinary_to_message() {
-        let hex = test_data::message();
+        let hex = ecdsa_test_data::message();
         let message = MsgToSign::try_from(hex.clone()).unwrap();
         assert_eq!(HexBinary::from(message), hex);
     }

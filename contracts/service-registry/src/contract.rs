@@ -4,7 +4,6 @@ use cosmwasm_std::{
     to_binary, Addr, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Response,
     Uint128,
 };
-// use cw2::set_contract_version;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
@@ -111,6 +110,8 @@ pub fn execute(
 }
 
 pub mod execute {
+    use connection_router::state::ChainName;
+
     use crate::state::{AuthorizationState, WORKERS, WORKERS_PER_CHAIN};
 
     use super::*;
@@ -240,7 +241,7 @@ pub mod execute {
         deps: DepsMut,
         info: MessageInfo,
         service_name: String,
-        chains: Vec<String>,
+        chains: Vec<ChainName>,
     ) -> Result<Response, ContractError> {
         SERVICES
             .may_load(deps.storage, &service_name)?
@@ -333,10 +334,19 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
             chain_name,
         } => to_binary(&query::get_active_workers(deps, service_name, chain_name)?)
             .map_err(|err| err.into()),
+        QueryMsg::GetWorker {
+            service_name,
+            worker,
+        } => to_binary(&query::get_worker(deps, worker, service_name)?).map_err(|err| err.into()),
+        QueryMsg::GetService { service_name } => {
+            to_binary(&query::get_service(deps, service_name)?).map_err(|err| err.into())
+        }
     }
 }
 
 pub mod query {
+    use connection_router::state::ChainName;
+
     use crate::state::{AuthorizationState, WORKERS, WORKERS_PER_CHAIN};
 
     use super::*;
@@ -344,7 +354,7 @@ pub mod query {
     pub fn get_active_workers(
         deps: Deps,
         service_name: String,
-        chain_name: String,
+        chain_name: ChainName,
     ) -> Result<Vec<Worker>, ContractError> {
         let service = SERVICES
             .may_load(deps.storage, &service_name)?
@@ -364,5 +374,24 @@ pub mod query {
             .collect();
 
         Ok(workers)
+    }
+
+    pub fn get_worker(
+        deps: Deps,
+        service_name: String,
+        worker: String,
+    ) -> Result<Worker, ContractError> {
+        WORKERS
+            .may_load(
+                deps.storage,
+                (&service_name, &deps.api.addr_validate(&worker)?),
+            )?
+            .ok_or(ContractError::WorkerNotFound)
+    }
+
+    pub fn get_service(deps: Deps, service_name: String) -> Result<Service, ContractError> {
+        SERVICES
+            .may_load(deps.storage, &service_name)?
+            .ok_or(ContractError::ServiceNotFound)
     }
 }

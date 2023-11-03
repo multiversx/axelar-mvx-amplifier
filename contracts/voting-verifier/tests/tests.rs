@@ -3,7 +3,7 @@ use cw_multi_test::{App, ContractWrapper, Executor};
 
 use axelar_wasm_std::operators::Operators;
 use axelar_wasm_std::{nonempty, Threshold};
-use connection_router::state::{ChainName, CrossChainId, MessageId, NewMessage, ID_SEPARATOR};
+use connection_router::state::{ChainName, CrossChainId, Message, ID_SEPARATOR};
 use service_registry::state::Worker;
 use voting_verifier::{contract, error::ContractError, msg};
 
@@ -44,13 +44,15 @@ fn initialize_contract(app: &mut App, service_registry_address: nonempty::String
     address
 }
 
-fn message_id(id: &str, index: u64) -> String {
+fn message_id(id: &str, index: u64) -> nonempty::String {
     format!("{}{}{}", id, ID_SEPARATOR, index)
+        .try_into()
+        .unwrap()
 }
 
-fn messages(len: u64) -> Vec<NewMessage> {
+fn messages(len: u64) -> Vec<Message> {
     (0..len)
-        .map(|i| NewMessage {
+        .map(|i| Message {
             cc_id: CrossChainId {
                 chain: source_chain(),
                 id: format!("id:{i}").parse().unwrap(),
@@ -58,7 +60,7 @@ fn messages(len: u64) -> Vec<NewMessage> {
             source_address: format!("source_address{i}").parse().unwrap(),
             destination_chain: format!("destination_chain{i}").parse().unwrap(),
             destination_address: format!("destination_address{i}").parse().unwrap(),
-            payload_hash: vec![0, 0, 0, 0].into(),
+            payload_hash: [0; 32],
         })
         .collect()
 }
@@ -74,7 +76,7 @@ fn should_failed_if_messages_are_not_from_same_source() {
 
     let msg = msg::ExecuteMsg::VerifyMessages {
         messages: vec![
-            NewMessage {
+            Message {
                 cc_id: CrossChainId {
                     chain: source_chain(),
                     id: "id:1".parse().unwrap(),
@@ -82,9 +84,9 @@ fn should_failed_if_messages_are_not_from_same_source() {
                 source_address: "source_address1".parse().unwrap(),
                 destination_chain: "destination_chain1".parse().unwrap(),
                 destination_address: "destination_address1".parse().unwrap(),
-                payload_hash: vec![0, 0, 0, 0].into(),
+                payload_hash: [0; 32],
             },
-            NewMessage {
+            Message {
                 cc_id: CrossChainId {
                     chain: "other_chain".parse().unwrap(),
                     id: "id:2".parse().unwrap(),
@@ -92,7 +94,7 @@ fn should_failed_if_messages_are_not_from_same_source() {
                 source_address: "source_address2".parse().unwrap(),
                 destination_chain: "destination_chain2".parse().unwrap(),
                 destination_address: "destination_address2".parse().unwrap(),
-                payload_hash: vec![0, 0, 0, 0].into(),
+                payload_hash: [0; 32],
             },
         ],
     };
@@ -252,7 +254,7 @@ fn should_start_worker_set_confirmation() {
         threshold: 1u64.into(),
     };
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -281,7 +283,7 @@ fn should_confirm_worker_set() {
             service_registry_address,
             &service_registry::msg::QueryMsg::GetActiveWorkers {
                 service_name: "service_name".to_string(),
-                chain_name: source_chain().to_string(),
+                chain_name: source_chain(),
             },
         )
         .unwrap();
@@ -291,7 +293,7 @@ fn should_confirm_worker_set() {
         threshold: 1u64.into(),
     };
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -335,7 +337,7 @@ fn should_not_confirm_worker_set() {
             service_registry_address,
             &service_registry::msg::QueryMsg::GetActiveWorkers {
                 service_name: "service_name".to_string(),
-                chain_name: source_chain().to_string(),
+                chain_name: source_chain(),
             },
         )
         .unwrap();
@@ -345,7 +347,7 @@ fn should_not_confirm_worker_set() {
         threshold: 1u64.into(),
     };
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -389,7 +391,7 @@ fn should_confirm_worker_set_after_failed() {
             service_registry_address,
             &service_registry::msg::QueryMsg::GetActiveWorkers {
                 service_name: "service_name".to_string(),
-                chain_name: source_chain().to_string(),
+                chain_name: source_chain(),
             },
         )
         .unwrap();
@@ -399,7 +401,7 @@ fn should_confirm_worker_set_after_failed() {
         threshold: 1u64.into(),
     };
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -431,7 +433,7 @@ fn should_confirm_worker_set_after_failed() {
 
     // try again, and this time vote true
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -475,7 +477,7 @@ fn should_not_confirm_twice() {
             service_registry_address,
             &service_registry::msg::QueryMsg::GetActiveWorkers {
                 service_name: "service_name".to_string(),
-                chain_name: source_chain().to_string(),
+                chain_name: source_chain(),
             },
         )
         .unwrap();
@@ -485,7 +487,7 @@ fn should_not_confirm_twice() {
         threshold: 1u64.into(),
     };
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);
@@ -508,7 +510,7 @@ fn should_not_confirm_twice() {
 
     // try again, should fail
     let msg = msg::ExecuteMsg::ConfirmWorkerSet {
-        message_id: MessageId::try_from(message_id("id", 0)).unwrap(),
+        message_id: message_id("id", 0),
         new_operators: operators.clone(),
     };
     let res = app.execute_contract(Addr::unchecked(SENDER), contract_address.clone(), &msg, &[]);

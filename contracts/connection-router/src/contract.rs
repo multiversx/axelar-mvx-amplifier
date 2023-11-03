@@ -40,7 +40,7 @@ pub fn execute(
         } => {
             execute::require_governance(&deps, info)?;
             let gateway_address = deps.api.addr_validate(&gateway_address)?;
-            execute::register_chain(deps, chain.parse()?, gateway_address)
+            execute::register_chain(deps, chain, gateway_address)
         }
         ExecuteMsg::UpgradeGateway {
             chain,
@@ -48,15 +48,15 @@ pub fn execute(
         } => {
             execute::require_governance(&deps, info)?;
             let contract_address = deps.api.addr_validate(&contract_address)?;
-            execute::upgrade_gateway(deps, chain.parse()?, contract_address)
+            execute::upgrade_gateway(deps, chain, contract_address)
         }
         ExecuteMsg::FreezeChain { chain, direction } => {
             execute::require_admin(&deps, info)?;
-            execute::freeze_chain(deps, chain.parse()?, direction)
+            execute::freeze_chain(deps, chain, direction)
         }
         ExecuteMsg::UnfreezeChain { chain, direction } => {
             execute::require_admin(&deps, info)?;
-            execute::unfreeze_chain(deps, chain.parse()?, direction)
+            execute::unfreeze_chain(deps, chain, direction)
         }
         ExecuteMsg::RouteMessages(msgs) => execute::route_message(deps, info, msgs),
     }
@@ -72,7 +72,7 @@ pub mod execute {
     use axelar_wasm_std::flagset::FlagSet;
 
     use crate::events::{ChainFrozen, GatewayInfo, GatewayUpgraded, MessageRouted};
-    use crate::state::{ChainEndpoint, ChainName, Gateway, GatewayDirection, NewMessage};
+    use crate::state::{ChainEndpoint, ChainName, Gateway, GatewayDirection, Message};
 
     use super::*;
 
@@ -174,7 +174,7 @@ pub mod execute {
     pub fn route_message(
         deps: DepsMut,
         info: MessageInfo,
-        msgs: Vec<NewMessage>,
+        msgs: Vec<Message>,
     ) -> Result<Response, ContractError> {
         let source_chain = find_chain_for_gateway(&deps, &info.sender)?
             .ok_or(ContractError::GatewayNotRegistered)?;

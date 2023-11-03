@@ -7,10 +7,7 @@ use cosmwasm_std::{HexBinary, Uint256};
 use crate::{error::ContractError, state::WorkerSet};
 
 use itertools::Itertools;
-use multisig::{
-    key::{NonRecoverable, Recoverable, Signature},
-    msg::Signer,
-};
+use multisig::{key::Signature, msg::Signer};
 
 use crate::types::{CommandBatch, Operator};
 
@@ -51,7 +48,7 @@ pub fn transfer_operatorship_params(worker_set: &WorkerSet) -> Result<HexBinary,
 #[allow(dead_code)]
 fn encode_proof(
     quorum: Uint256,
-    signers: Vec<(Signer, Option<Signature<Recoverable>>)>,
+    signers: Vec<(Signer, Option<Signature>)>,
 ) -> Result<HexBinary, ContractError> {
     let mut operators = make_operators_with_sigs(signers);
     operators.sort(); // gateway requires operators to be sorted
@@ -72,9 +69,7 @@ fn encode_proof(
     Ok(to_bytes(&(addresses, weights, quorum, signatures))?.into())
 }
 
-fn make_operators_with_sigs(
-    signers_with_sigs: Vec<(Signer, Option<Signature<Recoverable>>)>,
-) -> Vec<Operator<Recoverable>> {
+fn make_operators_with_sigs(signers_with_sigs: Vec<(Signer, Option<Signature>)>) -> Vec<Operator> {
     signers_with_sigs
         .into_iter()
         .map(|(signer, sig)| Operator {
@@ -89,14 +84,8 @@ pub fn command_params(
     source_chain: String,
     source_address: String,
     destination_address: String,
-    payload_hash: HexBinary,
+    payload_hash: &[u8; 32],
 ) -> Result<HexBinary, ContractError> {
-    if payload_hash.len() != 32 {
-        return Err(ContractError::InvalidMessage {
-            reason: format!("payload hash is not 32 bytes {}", payload_hash.to_hex()),
-        });
-    }
-
     let destination_address = <[u8; 32]>::try_from(
         HexBinary::from_hex(&destination_address)?.to_vec(),
     )
@@ -164,20 +153,24 @@ pub fn msg_digest(command_batch: &CommandBatch) -> HexBinary {
 pub fn encode_execute_data(
     command_batch: &CommandBatch,
     quorum: Uint256,
-    signers: Vec<(Signer, Option<Signature<NonRecoverable>>)>,
+    signers: Vec<(Signer, Option<Signature>)>,
 ) -> Result<HexBinary, ContractError> {
     let signers = signers
         .into_iter()
-        .map(|(signer, non_recoverable)| {
-            let recoverable = non_recoverable.map(|sig| {
-                sig.to_recoverable(
-                    command_batch.msg_digest().as_slice(),
-                    &signer.pub_key,
-                    identity,
-                )
-                .expect("couldn't recover signature")
-            });
-            (signer, recoverable)
+        .map(|(signer, signature)| {
+            let mut signature = signature;
+            if let Some(Signature::Ecdsa(nonrecoverable)) = signature {
+                signature = nonrecoverable
+                    .to_recoverable(
+                        command_batch.msg_digest().as_slice(),
+                        &signer.pub_key,
+                        identity,
+                    )
+                    .map(Signature::EcdsaRecoverable)
+                    .ok();
+            }
+
+            (signer, signature)
         })
         .collect::<Vec<_>>();
     let input = to_bytes(&(
@@ -201,11 +194,11 @@ fn u256_to_u64(chain_id: Uint256) -> u64 {
 #[cfg(test)]
 mod test {
 
-    use std::{marker::PhantomData, vec};
+    use std::vec;
 
     use axelar_wasm_std::operators::Operators;
     use bcs::from_bytes;
-    use connection_router::msg::Message;
+    use connection_router::state::Message;
     use cosmwasm_std::{Addr, HexBinary, Uint256};
 
     use multisig::{
@@ -221,7 +214,6 @@ mod test {
             },
             CommandBatchBuilder, Data,
         },
-        state::WorkerSet,
         test::test_data,
         types::{BatchID, Command, CommandBatch},
     };
@@ -303,8 +295,8 @@ mod test {
                 .unwrap(),
             ),
         },
-        Some(Signature::Ecdsa(
-        HexBinary::from_hex("283786d844a7c4d1d424837074d0c8ec71becdcba4dd42b5307cb543a0e2c8b81c10ad541defd5ce84d2a608fc454827d0b65b4865c8192a2ea1736a5c4b72021b").unwrap(), PhantomData))),
+        Some(Signature::EcdsaRecoverable(
+        HexBinary::from_hex("283786d844a7c4d1d424837074d0c8ec71becdcba4dd42b5307cb543a0e2c8b81c10ad541defd5ce84d2a608fc454827d0b65b4865c8192a2ea1736a5c4b72021b").unwrap().try_into().unwrap()))),
             (Signer {
             address: Addr::unchecked("axelarvaloper1x86a8prx97ekkqej2x636utrdu23y8wupp9gk5"),
             weight: Uint256::from(10u128),
@@ -315,8 +307,8 @@ mod test {
                 .unwrap(),
             ),
         },
-        Some(Signature::Ecdsa(
-        HexBinary::from_hex("283786d844a7c4d1d424837074d0c8ec71becdcba4dd42b5307cb543a0e2c8b81c10ad541defd5ce84d2a608fc454827d0b65b4865c8192a2ea1736a5c4b72021b").unwrap(), PhantomData)))];
+        Some(Signature::EcdsaRecoverable(
+        HexBinary::from_hex("283786d844a7c4d1d424837074d0c8ec71becdcba4dd42b5307cb543a0e2c8b81c10ad541defd5ce84d2a608fc454827d0b65b4865c8192a2ea1736a5c4b72021b").unwrap().try_into().unwrap())))];
 
         let quorum = Uint256::from(10u128);
         let proof = encode_proof(quorum, signers.clone());
@@ -375,7 +367,7 @@ mod test {
             "Ethereum".into(),
             "00".into(),
             "01".repeat(32).into(),
-            HexBinary::from_hex(&"02".repeat(32)).unwrap(),
+            &[2; 32],
         );
         assert!(res.is_ok());
 
@@ -402,12 +394,7 @@ mod test {
 
     #[test]
     fn test_invalid_destination_address() {
-        let res = command_params(
-            "Ethereum".into(),
-            "00".into(),
-            "01".into(),
-            HexBinary::from_hex("02").unwrap(),
-        );
+        let res = command_params("Ethereum".into(), "00".into(), "01".into(), &[2; 32]);
         assert!(!res.is_ok());
     }
 
@@ -416,7 +403,7 @@ mod test {
         let source_chain = "Ethereum";
         let source_address = "AA";
         let destination_address = "BB".repeat(32);
-        let payload_hash = HexBinary::from_hex(&"CC".repeat(32)).unwrap();
+        let payload_hash = [204u8; 32];
         let destination_chain_id = 1u64;
         let command_id = HexBinary::from_hex(&"FF".repeat(32)).unwrap();
         let data = Data {
@@ -428,7 +415,7 @@ mod test {
                     source_chain.into(),
                     source_address.into(),
                     destination_address.clone().into(),
-                    payload_hash.clone().into(),
+                    &payload_hash,
                 )
                 .unwrap(),
             }],
@@ -477,12 +464,11 @@ mod test {
         let mut builder = CommandBatchBuilder::new(1u128.into(), crate::encoding::Encoder::Bcs);
         let _ = builder
             .add_message(Message {
-                id: "ethereum:foobar".into(),
-                destination_address: "0F".repeat(32),
-                destination_chain: "sui".into(),
-                source_chain: "ethereum".into(),
-                source_address: "0x00".into(),
-                payload_hash: HexBinary::from(vec![1; 32]),
+                cc_id: "ethereum:foobar:1".parse().unwrap(),
+                destination_address: "0F".repeat(32).parse().unwrap(),
+                destination_chain: "sui".parse().unwrap(),
+                source_address: "0x00".parse().unwrap(),
+                payload_hash: [1; 32],
             })
             .unwrap();
         let batch = builder.build().unwrap();
@@ -492,12 +478,11 @@ mod test {
         let mut builder = CommandBatchBuilder::new(1u128.into(), crate::encoding::Encoder::Bcs);
         let _ = builder
             .add_message(Message {
-                id: "ethereum:foobar2".into(),
-                destination_address: "0A".repeat(32),
-                destination_chain: "sui".into(),
-                source_chain: "ethereum".into(),
-                source_address: "0x00".into(),
-                payload_hash: HexBinary::from(vec![2; 32]),
+                cc_id: "ethereum:foobar:2".parse().unwrap(),
+                destination_address: "0A".repeat(32).parse().unwrap(),
+                destination_chain: "sui".parse().unwrap(),
+                source_address: "0x00".parse().unwrap(),
+                payload_hash: [2; 32],
             })
             .unwrap();
 
@@ -521,13 +506,8 @@ mod test {
                     )
                     .unwrap(),
                     ty: crate::types::CommandType::ApproveContractCall,
-                    params: command_params(
-                        "ETH".into(),
-                        "0x0".into(),
-                        zero_addr.clone(),
-                        HexBinary::from([0; 32]),
-                    )
-                    .unwrap(),
+                    params: command_params("ETH".into(), "0x0".into(), zero_addr.clone(), &[0; 32])
+                        .unwrap(),
                 },
                 Command {
                     id: HexBinary::from_hex(
@@ -535,13 +515,8 @@ mod test {
                     )
                     .unwrap(),
                     ty: crate::types::CommandType::ApproveContractCall,
-                    params: command_params(
-                        "AXELAR".into(),
-                        "0x1".into(),
-                        zero_addr,
-                        HexBinary::from([0; 32]),
-                    )
-                    .unwrap(),
+                    params: command_params("AXELAR".into(), "0x1".into(), zero_addr, &[0; 32])
+                        .unwrap(),
                 },
             ],
         };
@@ -565,8 +540,7 @@ mod test {
             ),
         };
         let signature = Signature::Ecdsa(
-        HexBinary::from_hex("ef5ce016a4beed7e11761e5831805e962fca3d8901696a61a6ffd3af2b646bdc3740f64643bdb164b8151d1424eb4943d03f71e71816c00726e2d68ee55600c6").unwrap(), 
-    PhantomData);
+        HexBinary::from_hex("ef5ce016a4beed7e11761e5831805e962fca3d8901696a61a6ffd3af2b646bdc3740f64643bdb164b8151d1424eb4943d03f71e71816c00726e2d68ee55600c6").unwrap().try_into().unwrap());
         let encoded = encode_execute_data(
             &command_batch,
             Uint256::from(quorum),

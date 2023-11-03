@@ -5,10 +5,10 @@ use cosmwasm_std::{
 
 use axelar_wasm_std::voting::{PollID, PollResult};
 use axelar_wasm_std::{
-    snapshot,
+    nonempty, snapshot,
     voting::{Poll, WeightedPoll},
 };
-use connection_router::state::{ChainName, MessageId, NewMessage};
+use connection_router::state::{ChainName, Message};
 use service_registry::msg::QueryMsg;
 use service_registry::state::Worker;
 
@@ -26,14 +26,14 @@ use crate::state::{
 };
 
 enum VerificationStatus {
-    Verified(NewMessage),
-    Pending(NewMessage),
+    Verified(Message),
+    Pending(Message),
 }
 
 pub fn confirm_worker_set(
     deps: DepsMut,
     env: Env,
-    message_id: MessageId,
+    message_id: nonempty::String,
     new_operators: Operators,
 ) -> Result<Response, ContractError> {
     if CONFIRMED_WORKER_SETS
@@ -44,7 +44,7 @@ pub fn confirm_worker_set(
     }
 
     let config = CONFIG.load(deps.storage)?;
-    let snapshot = take_snapshot(deps.as_ref(), &env, &config.source_chain)?;
+    let snapshot = take_snapshot(deps.as_ref(), &config.source_chain)?;
     let participants = snapshot.get_participants();
 
     let poll_id = create_worker_set_poll(
@@ -75,7 +75,7 @@ pub fn confirm_worker_set(
 pub fn verify_messages(
     deps: DepsMut,
     env: Env,
-    messages: Vec<NewMessage>,
+    messages: Vec<Message>,
 ) -> Result<Response, ContractError> {
     if messages.is_empty() {
         Err(ContractError::EmptyMessages)?;
@@ -115,7 +115,7 @@ pub fn verify_messages(
             .collect(),
     })?);
 
-    let pending_messages: Vec<NewMessage> = messages
+    let pending_messages: Vec<Message> = messages
         .into_iter()
         .filter_map(|status| match status {
             Pending(message) => Some(message),
@@ -127,7 +127,7 @@ pub fn verify_messages(
         return Ok(response);
     }
 
-    let snapshot = take_snapshot(deps.as_ref(), &env, &pending_messages[0].cc_id.chain)?;
+    let snapshot = take_snapshot(deps.as_ref(), &pending_messages[0].cc_id.chain)?;
     let participants = snapshot.get_participants();
     let id = create_messages_poll(
         deps.storage,
@@ -208,7 +208,7 @@ fn end_poll_messages(
             true => Some(message),
             false => None,
         })
-        .collect::<Vec<&NewMessage>>();
+        .collect::<Vec<&Message>>();
 
     for message in messages {
         if !is_message_verified(deps.as_ref(), message)? {
@@ -271,18 +271,14 @@ pub fn end_poll(deps: DepsMut, env: Env, poll_id: PollID) -> Result<Response, Co
         .set_data(to_binary(&EndPollResponse { poll_result })?))
 }
 
-fn take_snapshot(
-    deps: Deps,
-    env: &Env,
-    chain: &ChainName,
-) -> Result<snapshot::Snapshot, ContractError> {
+fn take_snapshot(deps: Deps, chain: &ChainName) -> Result<snapshot::Snapshot, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
     // todo: add chain param to query after service registry updated
     // query service registry for active workers
     let active_workers_query = QueryMsg::GetActiveWorkers {
         service_name: config.service_name.to_string(),
-        chain_name: chain.clone().into(),
+        chain_name: chain.clone(),
     };
 
     let workers: Vec<Worker> = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
@@ -296,8 +292,6 @@ fn take_snapshot(
         .collect::<Result<Vec<snapshot::Participant>, _>>()?;
 
     Ok(snapshot::Snapshot::new(
-        env.block.time.try_into()?,
-        env.block.height.try_into()?,
         config.voting_threshold,
         participants.try_into()?,
     ))
@@ -335,7 +329,7 @@ fn create_messages_poll(
 fn remove_pending_message(
     store: &mut dyn Storage,
     poll_id: PollID,
-) -> Result<Vec<NewMessage>, ContractError> {
+) -> Result<Vec<Message>, ContractError> {
     let pending_messages = PENDING_MESSAGES
         .may_load(store, poll_id)?
         .ok_or(ContractError::PollNotFound)?;

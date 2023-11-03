@@ -1,17 +1,18 @@
 #![allow(deprecated)]
 
 use core::panic;
+use std::any::type_name;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, DepsMut, HexBinary, Order, StdError, StdResult};
+use cosmwasm_std::{Addr, DepsMut, Order, StdError, StdResult};
 use cw_storage_plus::{
     Index, IndexList, IndexedMap, Item, Key, KeyDeserialize, MultiIndex, Prefixer, PrimaryKey,
 };
-use error_stack::{bail, Report, ResultExt};
+use error_stack::{Report, ResultExt};
 use flagset::flags;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use axelar_wasm_std::flagset::FlagSet;
 use axelar_wasm_std::{nonempty, FnExt};
 
-use crate::{msg, ContractError};
+use crate::ContractError;
 
 pub const ID_SEPARATOR: char = ':';
 
@@ -88,153 +89,16 @@ impl<'a> IndexList<ChainEndpoint> for ChainEndpointIndexes<'a> {
 }
 
 #[cw_serde]
-pub struct NewMessage {
-    pub cc_id: CrossChainId,
-    pub destination_address: Address,
-    pub destination_chain: ChainName,
-    pub source_address: Address,
-    pub payload_hash: HexBinary,
-}
-
-/// temporary conversion until [Message] is removed
-impl TryFrom<NewMessage> for Message {
-    type Error = ContractError;
-
-    fn try_from(msg: NewMessage) -> Result<Self, Self::Error> {
-        Ok(Message {
-            id: format!("{}", msg.cc_id).parse()?,
-            destination_address: msg.destination_address.to_string(),
-            destination_chain: msg.destination_chain,
-            source_chain: msg.cc_id.chain,
-            source_address: msg.source_address.to_string(),
-            payload_hash: msg.payload_hash,
-        })
-    }
-}
-
-/// temporary conversion until [Message] is removed
-impl TryFrom<msg::Message> for NewMessage {
-    type Error = Report<ContractError>;
-
-    fn try_from(msg: msg::Message) -> Result<Self, Self::Error> {
-        let (_, id) = msg
-            .id
-            .split_once(ID_SEPARATOR)
-            .ok_or(ContractError::InvalidMessageId)?;
-
-        Ok(NewMessage {
-            cc_id: CrossChainId {
-                id: id.parse()?,
-                chain: msg.source_chain.parse()?,
-            },
-            destination_address: msg.destination_address.parse()?,
-            destination_chain: msg.destination_chain.parse()?,
-            source_address: msg.source_address.parse()?,
-            payload_hash: msg.payload_hash,
-        })
-    }
-}
-
-/// temporary conversion until [Message] is removed
-impl TryFrom<Message> for NewMessage {
-    type Error = Report<ContractError>;
-
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        let (chain, id) = msg
-            .id
-            .split_once(ID_SEPARATOR)
-            .ok_or(ContractError::InvalidMessageId)?;
-
-        if chain.parse::<ChainName>()? != msg.source_chain {
-            bail!(ContractError::InvalidMessageId);
-        }
-
-        Ok(NewMessage {
-            cc_id: CrossChainId {
-                id: id.parse()?,
-                chain: msg.source_chain,
-            },
-            destination_address: msg.destination_address.parse()?,
-            destination_chain: msg.destination_chain,
-            source_address: msg.source_address.parse()?,
-            payload_hash: msg.payload_hash,
-        })
-    }
-}
-
-// Message represents a message for which the fields have been successfully validated.
-// This should never be supplied by the user.
-#[cw_serde]
-#[deprecated(note = "use NewMessage instead")]
 pub struct Message {
-    pub id: MessageId, // globally unique
-    pub destination_address: String,
+    pub cc_id: CrossChainId,
+    pub source_address: Address,
     pub destination_chain: ChainName,
-    pub source_chain: ChainName,
-    pub source_address: String,
-    pub payload_hash: HexBinary,
-}
-
-impl Message {
-    pub fn new(
-        id: MessageId,
-        destination_address: String,
-        destination_chain: ChainName,
-        source_chain: ChainName,
-        source_address: String,
-        payload_hash: HexBinary,
-    ) -> Self {
-        Message {
-            id,
-            destination_address,
-            destination_chain,
-            source_chain,
-            source_address,
-            payload_hash,
-        }
-    }
-}
-
-impl TryFrom<msg::Message> for Message {
-    type Error = ContractError;
-    fn try_from(value: msg::Message) -> Result<Self, Self::Error> {
-        if value.destination_address.is_empty() {
-            return Err(ContractError::InvalidAddress);
-        }
-
-        if value.source_address.is_empty() {
-            return Err(ContractError::InvalidAddress);
-        }
-
-        if !value
-            .id
-            .starts_with(&format!("{}{}", value.source_chain, ID_SEPARATOR))
-        {
-            return Err(ContractError::InvalidMessageId);
-        }
-
-        Ok(Message::new(
-            value.id.parse()?,
-            value.destination_address,
-            value.destination_chain.parse()?,
-            value.source_chain.parse()?,
-            value.source_address,
-            value.payload_hash,
-        ))
-    }
-}
-
-impl From<Message> for msg::Message {
-    fn from(value: Message) -> Self {
-        msg::Message {
-            id: value.id.to_string(),
-            destination_address: value.destination_address,
-            destination_chain: value.destination_chain.into(),
-            source_address: value.source_address,
-            source_chain: value.source_chain.into(),
-            payload_hash: value.payload_hash,
-        }
-    }
+    pub destination_address: Address,
+    /// for better user experience, the payload hash gets encoded into hex at the edges (input/output),
+    /// but internally, we treat it as raw bytes to enforce it's format.
+    #[serde(with = "axelar_wasm_std::hex")]
+    #[schemars(with = "String")] // necessary attribute in conjunction with #[serde(with ...)]
+    pub payload_hash: [u8; 32],
 }
 
 #[cw_serde]
@@ -269,75 +133,10 @@ impl TryFrom<String> for Address {
 }
 
 #[cw_serde]
-#[serde(try_from = "String")]
-#[derive(Eq, Hash)]
-pub struct MessageId(String);
-
-impl FromStr for MessageId {
-    type Err = ContractError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // todo: should split in exactly 2 parts when migrated to state::NewMessage
-        let split: Vec<_> = s.split(ID_SEPARATOR).filter(|s| !s.is_empty()).collect();
-        if split.len() < 2 {
-            return Err(ContractError::InvalidMessageId);
-        }
-        Ok(MessageId(s.to_lowercase()))
-    }
-}
-
-impl TryFrom<String> for MessageId {
-    type Error = ContractError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.as_str().parse()
-    }
-}
-
-impl From<MessageId> for String {
-    fn from(d: MessageId) -> Self {
-        d.0
-    }
-}
-
-impl Deref for MessageId {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Display for MessageId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<'a> PrimaryKey<'a> for MessageId {
-    type Prefix = ();
-    type SubPrefix = ();
-    type Suffix = Self;
-    type SuperSuffix = Self;
-
-    fn key(&self) -> Vec<Key> {
-        vec![Key::Ref(self.0.as_bytes())]
-    }
-}
-
-impl KeyDeserialize for MessageId {
-    type Output = Self;
-
-    fn from_vec(value: Vec<u8>) -> StdResult<Self> {
-        let value = String::from_utf8(value).map_err(StdError::invalid_utf8)?;
-        Ok(Self(value))
-    }
-}
-
-#[cw_serde]
 #[derive(Eq, Hash)]
 pub struct CrossChainId {
     pub chain: ChainName,
-    pub id: MessageId,
+    pub id: nonempty::String,
 }
 
 /// todo: remove this when state::NewMessage is used
@@ -347,7 +146,13 @@ impl FromStr for CrossChainId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts = s.split_once(ID_SEPARATOR);
         let (chain, id) = parts
-            .map(|(chain, id)| (chain.parse::<ChainName>(), id.parse::<MessageId>()))
+            .map(|(chain, id)| {
+                (
+                    chain.parse::<ChainName>(),
+                    id.parse::<nonempty::String>()
+                        .map_err(|_| ContractError::InvalidMessageId),
+                )
+            })
             .ok_or(ContractError::InvalidMessageId)?;
         Ok(CrossChainId {
             chain: chain?,
@@ -358,15 +163,15 @@ impl FromStr for CrossChainId {
 
 impl Display for CrossChainId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}{}", &self.chain, ID_SEPARATOR, &self.id)
+        write!(f, "{}{}{}", self.chain, ID_SEPARATOR, *self.id)
     }
 }
 
 impl PrimaryKey<'_> for CrossChainId {
     type Prefix = ChainName;
     type SubPrefix = ();
-    type Suffix = MessageId;
-    type SuperSuffix = (ChainName, MessageId);
+    type Suffix = String;
+    type SuperSuffix = (ChainName, String);
 
     fn key(&self) -> Vec<Key> {
         let mut keys = self.chain.key();
@@ -379,8 +184,13 @@ impl KeyDeserialize for CrossChainId {
     type Output = Self;
 
     fn from_vec(value: Vec<u8>) -> StdResult<Self::Output> {
-        let (chain, id) = <(ChainName, MessageId)>::from_vec(value)?;
-        Ok(CrossChainId { chain, id })
+        let (chain, id) = <(ChainName, String)>::from_vec(value)?;
+        Ok(CrossChainId {
+            chain,
+            id: id
+                .try_into()
+                .map_err(|err| StdError::parse_err(type_name::<nonempty::String>(), err))?,
+        })
     }
 }
 
@@ -421,6 +231,12 @@ impl Display for ChainName {
     }
 }
 
+impl PartialEq<String> for ChainName {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == other.to_lowercase()
+    }
+}
+
 impl<'a> PrimaryKey<'a> for ChainName {
     type Prefix = ();
     type SubPrefix = ();
@@ -450,6 +266,15 @@ impl KeyDeserialize for ChainName {
     }
 }
 
+impl KeyDeserialize for &ChainName {
+    type Output = ChainName;
+
+    #[inline(always)]
+    fn from_vec(value: Vec<u8>) -> StdResult<Self::Output> {
+        ChainName::from_vec(value)
+    }
+}
+
 #[cw_serde]
 pub struct Gateway {
     pub address: Addr,
@@ -475,7 +300,7 @@ flags! {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use super::*;
 
     use cosmwasm_std::to_vec;
     use hex;
@@ -483,22 +308,14 @@ mod tests {
     use rand::{thread_rng, Rng};
     use sha3::{Digest, Sha3_256};
 
-    use crate::state::{ChainName, CrossChainId, MessageId, NewMessage, ID_SEPARATOR};
     use crate::ContractError;
-
-    #[test]
-    fn create_correct_global_message_id() {
-        let msg = dummy_message();
-
-        assert_eq!(msg.cc_id.to_string(), "chain:hash:index".to_string());
-    }
 
     #[test]
     // Any modifications to the Message struct fields or their types
     // will cause this test to fail, indicating that a migration is needed.
     fn test_message_struct_unchanged() {
         let expected_message_hash =
-            "252e44129132a3bac9b26ee4d7f247453bd80b2aa0513050c274d5c5cf2f7153";
+            "9f9b9c55ccf5ce5a82f66385cae9e84e402a272fece5a2e22a199dbefc91d8bf";
 
         let msg = dummy_message();
 
@@ -563,35 +380,19 @@ mod tests {
     }
 
     #[test]
-    fn message_id_must_have_at_least_one_separator() {
-        assert!(MessageId::from_str("source_chain:hash:id").is_ok());
-        assert!(serde_json::from_str::<MessageId>("\"source_chain:hash:id\"").is_ok());
+    fn chain_name_case_insensitive_comparison() {
+        let chain_name = ChainName::from_str("ethereum").unwrap();
 
-        assert!(MessageId::from_str("invalid_hash").is_err());
-        assert!(serde_json::from_str::<MessageId>("\"invalid_hash\"").is_err());
+        assert!(chain_name.eq(&"Ethereum".to_string()));
+        assert!(chain_name.eq(&"ETHEREUM".to_string()));
+        assert!(chain_name.eq(&"ethereum".to_string()));
+        assert!(chain_name.eq(&"ethEReum".to_string()));
 
-        assert!(MessageId::from_str("invalid_hash:").is_err());
+        assert!(!chain_name.eq(&"Ethereum-1".to_string()));
     }
 
-    #[test]
-    fn message_id_is_lower_case() {
-        let msg_id = "HaSH:iD".parse::<MessageId>().unwrap();
-        assert_eq!(msg_id.to_string(), "hash:id");
-    }
-
-    #[test]
-    fn serialize_global_message_id() {
-        let id = CrossChainId {
-            chain: "ethereum".parse().unwrap(),
-            id: "hash:id".parse().unwrap(),
-        };
-
-        let serialized = serde_json::to_string(&id).unwrap();
-        assert_eq!(id, serde_json::from_str(&serialized).unwrap());
-    }
-
-    fn dummy_message() -> NewMessage {
-        NewMessage {
+    fn dummy_message() -> Message {
+        Message {
             cc_id: CrossChainId {
                 id: "hash:index".parse().unwrap(),
                 chain: "chain".parse().unwrap(),
