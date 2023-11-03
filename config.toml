@@ -1,0 +1,49 @@
+tm_jsonrpc="http://afa3c36549f2d47d98d1b33e7843c3e2-568317.us-east-2.elb.amazonaws.com:26657"
+tm_grpc="tcp://afa3c36549f2d47d98d1b33e7843c3e2-568317.us-east-2.elb.amazonaws.com:9090"
+event_buffer_capacity=1000
+
+
+[broadcast]
+chain_id="devnet-amplifier"
+gas_adjustment=2
+tx_fetch_max_retries=6.0
+batch_gas_limit=1000000
+queue_cap=1000
+broadcast_interval="1s"
+tx_fetch_interval="2s"
+gas_price="0.00005uamplifier"
+
+[tofnd_config]
+url="http://127.0.0.1:50051"
+party_uid="ampd"
+key_uid="axelar"
+
+batch_gas_limit=10000000
+
+[[handlers]]
+type = 'EvmMsgVerifier'
+cosmwasm_contract = 'axelar1z40g4ucszrt8xz9lvmjtzx3s5yues0u9qjh7rekf8xyl2wamjs3qzq075e'
+chain_name = 'optimism'
+chain_rpc_url = "https://optimism-goerli.public.blastapi.io"
+
+[[handlers]]
+type = 'EvmMsgVerifier'
+cosmwasm_contract = 'axelar1ry3gvz6ssugylqagt6na7hl0ztlv8k6vttedag5l784e84xx8qtsymp40r'
+chain_name = 'arbitrum'
+chain_rpc_url = "https://goerli-rollup.arbitrum.io/rpc"
+
+[[handlers]]
+type = 'EvmWorkerSetVerifier'
+cosmwasm_contract = 'axelar1z40g4ucszrt8xz9lvmjtzx3s5yues0u9qjh7rekf8xyl2wamjs3qzq075e'
+chain_name = 'optimism'
+chain_rpc_url = "https://optimism-goerli.public.blastapi.io"
+
+[[handlers]]
+type = 'EvmWorkerSetVerifier'
+cosmwasm_contract = 'axelar1ry3gvz6ssugylqagt6na7hl0ztlv8k6vttedag5l784e84xx8qtsymp40r'
+chain_name = 'arbitrum'
+chain_rpc_url = "https://goerli-rollup.arbitrum.io/rpc"
+
+[[handlers]]
+type = 'MultisigSigner'
+cosmwasm_contract = 'axelar15xve5k6qhvggr8k8m9afze8ujmjvnd47zwf0q7fgpwxvgjel5vcstepca6'
