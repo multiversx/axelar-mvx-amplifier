@@ -58,7 +58,7 @@ fn make_transfer_operatorship(
     let params = match encoding {
         Encoder::Abi => abi::transfer_operatorship_params(&worker_set),
         Encoder::Bcs => bcs::transfer_operatorship_params(&worker_set),
-        Encoder::Mvx => bcs::transfer_operatorship_params(&worker_set), // TODO:
+        Encoder::Mvx => mvx::transfer_operatorship_params(&worker_set),
     }?;
     Ok(Command {
         ty: CommandType::TransferOperatorship,
@@ -121,7 +121,7 @@ impl CommandBatch {
         match self.encoder {
             Encoder::Abi => abi::msg_digest(self),
             Encoder::Bcs => bcs::msg_digest(self),
-            Encoder::Mvx => bcs::msg_digest(self), // TODO:
+            Encoder::Mvx => mvx::msg_digest(self),
         }
     }
 
@@ -133,7 +133,7 @@ impl CommandBatch {
         match self.encoder {
             Encoder::Abi => abi::encode_execute_data(self, quorum, signers),
             Encoder::Bcs => bcs::encode_execute_data(self, quorum, signers),
-            Encoder::Mvx => bcs::encode_execute_data(self, quorum, signers), // TODO
+            Encoder::Mvx => bcs::encode_execute_data(self, quorum, signers),
         }
     }
 }
@@ -149,7 +149,7 @@ impl Data {
         match encoder {
             Encoder::Abi => abi::encode(self),
             Encoder::Bcs => bcs::encode(self),
-            Encoder::Mvx => bcs::encode(self), // TODO
+            Encoder::Mvx => mvx::encode(self),
         }
     }
 }
@@ -221,7 +221,7 @@ mod test {
         assert_eq!(res.ty, CommandType::ApproveContractCall);
 
         let mut router_message = router_message.to_owned();
-        router_message.destination_address = "FF".repeat(32).parse().unwrap();
+        router_message.destination_address = "erd1qqqqqqqqqqqqqpgqhe8t5jewej70zupmh44jurgn29psua5l2jps3ntjj3".parse().unwrap();
         let res = make_command(router_message.to_owned(), Encoder::Mvx);
         assert!(res.is_ok());
 
@@ -233,7 +233,6 @@ mod test {
                 .unwrap()
         );
         assert_eq!(res.ty, CommandType::ApproveContractCall);
-        // assert_eq!(res.params.to_hex(), "FF");
     }
 
     #[test]

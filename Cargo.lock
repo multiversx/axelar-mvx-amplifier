@@ -7477,6 +7477,7 @@ dependencies = [
  "axelar-wasm-std",
  "axelar-wasm-std-derive",
  "bcs",
+ "bech32",
  "connection-router",
  "cosmwasm-schema",
  "cosmwasm-std",
