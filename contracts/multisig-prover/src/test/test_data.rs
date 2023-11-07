@@ -77,8 +77,8 @@ pub fn new_worker_set() -> WorkerSet {
     }
 }
 
-pub fn new_worker_set_ed25519() -> WorkerSet {
-    let signers = vec![
+pub fn new_signers_ed25519() -> Vec<Signer> {
+    vec![
         Signer {
             address: Addr::unchecked("axelarvaloper1x86a8prx97ekkqej2x636utrdu23y8wupp9gk5"),
             weight: Uint256::from(10u128),
@@ -92,14 +92,18 @@ pub fn new_worker_set_ed25519() -> WorkerSet {
         Signer {
             address: Addr::unchecked("axelarvaloper1ff675m593vve8yh82lzhdnqfpu7m23cxstr6h4"),
             weight: Uint256::from(10u128),
-            pub_key: PublicKey::Ecdsa(
+            pub_key: PublicKey::Ed25519(
                 HexBinary::from_hex(
                     "ef637606f3144ee46343ba4a25c261b5c400ade88528e876f3deababa22a4449",
                 )
                     .unwrap(),
             ),
         },
-    ];
+    ]
+}
+
+pub fn new_worker_set_ed25519() -> WorkerSet {
+    let signers = new_signers_ed25519();
 
     let mut btree_signers = BTreeSet::new();
     for signer in signers {

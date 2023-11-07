@@ -133,7 +133,7 @@ impl CommandBatch {
         match self.encoder {
             Encoder::Abi => abi::encode_execute_data(self, quorum, signers),
             Encoder::Bcs => bcs::encode_execute_data(self, quorum, signers),
-            Encoder::Mvx => bcs::encode_execute_data(self, quorum, signers),
+            Encoder::Mvx => mvx::encode_execute_data(self, quorum, signers),
         }
     }
 }
@@ -163,7 +163,7 @@ pub fn make_operators(worker_set: WorkerSet, encoder: Encoder) -> Operators {
     match encoder {
         Encoder::Abi => abi::make_operators(worker_set),
         Encoder::Bcs => bcs::make_operators(worker_set),
-        Encoder::Mvx => bcs::make_operators(worker_set), // TODO
+        Encoder::Mvx => mvx::make_operators(worker_set),
     }
 }
 
