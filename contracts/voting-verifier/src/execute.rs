@@ -167,18 +167,12 @@ pub fn vote(
     poll_id: PollID,
     votes: Vec<bool>,
 ) -> Result<Response, ContractError> {
-    let mut poll = POLLS
+    let poll = POLLS
         .may_load(deps.storage, poll_id)?
-        .ok_or(ContractError::PollNotFound)?;
-    match &mut poll {
-        state::Poll::Messages(poll) | state::Poll::ConfirmWorkerSet(poll) => {
-            poll.cast_vote(env.block.height, &info.sender, votes)?
-        }
-    };
+        .ok_or(ContractError::PollNotFound)?
+        .cast_vote(env.block.height, &info.sender, votes)?;
 
     POLLS.save(deps.storage, poll_id, &poll)?;
-
-    // TODO: add rewards for late voters
 
     Ok(Response::new().add_event(
         Voted {
@@ -246,21 +240,17 @@ fn end_poll_worker_set(
 pub fn end_poll(deps: DepsMut, env: Env, poll_id: PollID) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    let mut poll = POLLS
+    let poll = POLLS
         .may_load(deps.storage, poll_id)?
-        .ok_or(ContractError::PollNotFound)?;
+        .ok_or(ContractError::PollNotFound)?
+        .finish(env.block.height)?;
 
-    let poll_result = match &mut poll {
-        state::Poll::Messages(poll) | state::Poll::ConfirmWorkerSet(poll) => {
-            poll.complete(env.block.height)?
-        }
-    };
     POLLS.save(deps.storage, poll_id, &poll)?;
 
+    let poll_result = poll.result();
+
     match poll {
-        state::Poll::Messages(_) => {
-            end_poll_messages(deps, poll_id, &poll_result)?;
-        }
+        state::Poll::Messages(_) => end_poll_messages(deps, poll_id, &poll_result)?,
         state::Poll::ConfirmWorkerSet(_) => end_poll_worker_set(deps, poll_id, &poll_result)?,
     };
 
@@ -271,7 +261,10 @@ pub fn end_poll(deps: DepsMut, env: Env, poll_id: PollID) -> Result<Response, Co
         .map(|address| WasmMsg::Execute {
             contract_addr: config.rewards_contract.to_string(),
             msg: to_binary(&rewards::msg::ExecuteMsg::RecordParticipation {
-                event_id: poll_id.into(),
+                event_id: poll_id
+                    .to_string()
+                    .try_into()
+                    .expect("couldn't convert poll id to nonempty string"),
                 worker_address: address.to_string(),
             })
             .expect("failed to serialize message for rewards contract"),

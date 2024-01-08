@@ -49,7 +49,7 @@ pub fn command_params(
 pub fn transfer_operatorship_params(worker_set: &WorkerSet) -> Result<HexBinary, ContractError> {
     let mut operators: Vec<([u8; 32], Uint256)> = worker_set
         .signers
-        .iter()
+        .values()
         .map(|signer| {
             (
                 <[u8; 32]>::try_from(signer.pub_key.as_ref())
@@ -126,7 +126,7 @@ pub fn encode_execute_data(
 pub fn make_operators(worker_set: WorkerSet) -> Operators {
     let mut operators: Vec<(HexBinary, Uint256)> = worker_set
         .signers
-        .iter()
+        .values()
         .map(|signer| {
             (
                 ed25519_key(signer.pub_key.clone())
@@ -372,7 +372,7 @@ mod test {
         let mut expected: Vec<(HexBinary, _)> = worker_set
             .clone()
             .signers
-            .into_iter()
+            .into_values()
             .map(|s| (s.pub_key.into(), s.weight))
             .collect();
         expected.sort_by_key(|op| op.0.clone());
