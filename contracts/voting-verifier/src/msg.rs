@@ -3,8 +3,8 @@ use cosmwasm_schema::{cw_serde, QueryResponses};
 use axelar_wasm_std::{
     nonempty,
     operators::Operators,
-    voting::{PollID, PollResult},
-    Threshold,
+    voting::{PollId, PollState, Vote},
+    MajorityThreshold,
 };
 use connection_router::state::{ChainName, CrossChainId, Message};
 
@@ -15,7 +15,7 @@ pub struct InstantiateMsg {
     pub service_name: nonempty::String,
 
     pub source_gateway_address: nonempty::String,
-    pub voting_threshold: Threshold,
+    pub voting_threshold: MajorityThreshold,
     pub block_expiry: u64,
     pub confirmation_height: u64,
     pub source_chain: ChainName,
@@ -27,13 +27,13 @@ pub enum ExecuteMsg {
     // Computes the results of a poll
     // For all verified messages, calls MessagesVerified on the verifier
     EndPoll {
-        poll_id: PollID,
+        poll_id: PollId,
     },
 
     // Casts votes for specified poll
     Vote {
-        poll_id: PollID,
-        votes: Vec<bool>,
+        poll_id: PollId,
+        votes: Vec<Vote>,
     },
 
     // returns a vector of true/false values, indicating current verification status for each message
@@ -43,7 +43,7 @@ pub enum ExecuteMsg {
     },
 
     // Starts a poll to confirm a worker set update on the external evm gateway
-    ConfirmWorkerSet {
+    VerifyWorkerSet {
         message_id: nonempty::String,
         new_operators: Operators,
     },
@@ -51,7 +51,7 @@ pub enum ExecuteMsg {
 
 #[cw_serde]
 pub struct Poll {
-    poll_id: PollID,
+    poll_id: PollId,
     messages: Vec<Message>,
 }
 
@@ -59,13 +59,13 @@ pub struct Poll {
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     #[returns(Poll)]
-    GetPoll { poll_id: PollID },
+    GetPoll { poll_id: PollId },
 
-    #[returns(Vec<(CrossChainId, bool)>)]
+    #[returns(Vec<(connection_router::state::CrossChainId, bool)>)]
     IsVerified { messages: Vec<Message> },
 
     #[returns(bool)]
-    IsWorkerSetConfirmed { new_operators: Operators },
+    IsWorkerSetVerified { new_operators: Operators },
 }
 
 #[cw_serde]
@@ -75,5 +75,5 @@ pub struct VerifyMessagesResponse {
 
 #[cw_serde]
 pub struct EndPollResponse {
-    pub poll_result: PollResult,
+    pub poll_result: PollState,
 }

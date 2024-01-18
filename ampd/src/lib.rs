@@ -1,5 +1,6 @@
 use std::pin::Pin;
 
+use block_height_monitor::BlockHeightMonitor;
 use cosmos_sdk_proto::cosmos::{
     auth::v1beta1::query_client::QueryClient, tx::v1beta1::service_client::ServiceClient,
 };
@@ -24,7 +25,9 @@ use multiversx_sdk::blockchain::{CommunicationProxy};
 use crate::config::Config;
 use crate::state::State;
 
+mod block_height_monitor;
 mod broadcaster;
+pub mod commands;
 pub mod config;
 pub mod error;
 mod event_processor;
@@ -62,6 +65,7 @@ async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>,
         handlers,
         tofnd_config,
         event_buffer_cap,
+        service_registry: _service_registry,
     } = cfg;
 
     let tm_client = tendermint_rpc::HttpClient::new(tm_jsonrpc.to_string().as_str())
@@ -76,6 +80,10 @@ async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>,
         .await
         .change_context(Error::Connection)?;
     let ecdsa_client = SharableEcdsaClient::new(multisig_client);
+
+    let block_height_monitor = BlockHeightMonitor::connect(tm_client.clone())
+        .await
+        .change_context(Error::Connection)?;
 
     let mut state_updater = StateUpdater::new(state);
     let pub_key = match state_updater.state().pub_key {
@@ -116,6 +124,7 @@ async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>,
         ecdsa_client,
         broadcast,
         event_buffer_cap,
+        block_height_monitor,
     )
     .configure_handlers(worker, handlers)
 }
@@ -131,6 +140,7 @@ where
     broadcaster_driver: QueuedBroadcasterDriver,
     state_updater: StateUpdater,
     ecdsa_client: SharableEcdsaClient,
+    block_height_monitor: BlockHeightMonitor<tendermint_rpc::HttpClient>,
     token: CancellationToken,
 }
 
@@ -145,6 +155,7 @@ where
         ecdsa_client: SharableEcdsaClient,
         broadcast_cfg: broadcaster::Config,
         event_buffer_cap: usize,
+        block_height_monitor: BlockHeightMonitor<tendermint_rpc::HttpClient>,
     ) -> Self {
         let token = CancellationToken::new();
 
@@ -169,6 +180,7 @@ where
             broadcaster_driver,
             state_updater,
             ecdsa_client,
+            block_height_monitor,
             token,
         }
     }
@@ -192,6 +204,7 @@ where
                         json_rpc::Client::new_http(&chain.rpc_url)
                             .change_context(Error::Connection)?,
                         self.broadcaster.client(),
+                        self.block_height_monitor.latest_block_height(),
                     ),
                 ),
                 handlers::config::Config::EvmWorkerSetVerifier {
@@ -206,6 +219,7 @@ where
                         json_rpc::Client::new_http(&chain.rpc_url)
                             .change_context(Error::Connection)?,
                         self.broadcaster.client(),
+                        self.block_height_monitor.latest_block_height(),
                     ),
                 ),
                 handlers::config::Config::MultisigSigner { cosmwasm_contract } => self
@@ -228,6 +242,20 @@ where
                         cosmwasm_contract,
                         json_rpc::Client::new_http(&rpc_url).change_context(Error::Connection)?,
                         self.broadcaster.client(),
+                        self.block_height_monitor.latest_block_height(),
+                    ),
+                ),
+                handlers::config::Config::SuiWorkerSetVerifier {
+                    cosmwasm_contract,
+                    rpc_url,
+                } => self.configure_handler(
+                    "sui-worker-set-verifier",
+                    handlers::sui_verify_worker_set::Handler::new(
+                        worker.clone(),
+                        cosmwasm_contract,
+                        json_rpc::Client::new_http(&rpc_url).change_context(Error::Connection)?,
+                        self.broadcaster.client(),
+                        self.block_height_monitor.latest_block_height(),
                     ),
                 ),
                 handlers::config::Config::MvxMsgVerifier {
@@ -288,6 +316,7 @@ where
             event_processor,
             broadcaster,
             state_updater,
+            block_height_monitor,
             token,
             ..
         } = self;
@@ -312,6 +341,11 @@ where
         set.spawn(event_sub.run().change_context(Error::EventSub));
         set.spawn(event_processor.run().change_context(Error::EventProcessor));
         set.spawn(broadcaster.run().change_context(Error::Broadcaster));
+        set.spawn(
+            block_height_monitor
+                .run(token.clone())
+                .change_context(Error::BlockHeightMonitor),
+        );
         set.spawn(async move {
             // assert: the app must wait for this task to exit before trying to receive the state
             state_tx
@@ -355,4 +389,10 @@ pub enum Error {
     Task,
     #[error("failed to return updated state")]
     ReturnState,
+    #[error("failed to load config")]
+    LoadConfig,
+    #[error("invalid input")]
+    InvalidInput,
+    #[error("block height monitor failed")]
+    BlockHeightMonitor,
 }

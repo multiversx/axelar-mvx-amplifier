@@ -3,12 +3,14 @@ use cosmwasm_std::Addr;
 use cw_storage_plus::{Item, Map};
 
 use axelar_wasm_std::{
-    counter, nonempty,
+    counter,
+    hash::Hash,
+    nonempty,
     operators::Operators,
-    voting::{self, PollID, WeightedPoll},
-    Threshold,
+    voting::{PollId, WeightedPoll},
+    MajorityThreshold,
 };
-use connection_router::state::{ChainName, CrossChainId, Message};
+use connection_router::state::{ChainName, Message};
 
 use crate::error::ContractError;
 
@@ -17,7 +19,7 @@ pub struct Config {
     pub service_registry_contract: Addr,
     pub service_name: nonempty::String,
     pub source_gateway_address: nonempty::String,
-    pub voting_threshold: Threshold,
+    pub voting_threshold: MajorityThreshold,
     pub block_expiry: u64, // number of blocks after which a poll expires
     pub confirmation_height: u64,
     pub source_chain: ChainName,
@@ -30,34 +32,8 @@ pub enum Poll {
     ConfirmWorkerSet(WeightedPoll),
 }
 
-impl voting::Poll for Poll {
-    type E = ContractError;
-
-    fn finish(self, block_height: u64) -> Result<Self, ContractError> {
-        self.try_map(|poll| poll.finish(block_height).map_err(ContractError::from))
-    }
-
-    fn result(&self) -> voting::PollResult {
-        match self {
-            Poll::Messages(poll) | Poll::ConfirmWorkerSet(poll) => poll.result(),
-        }
-    }
-
-    fn cast_vote(
-        self,
-        block_height: u64,
-        sender: &Addr,
-        votes: Vec<bool>,
-    ) -> Result<Self, ContractError> {
-        self.try_map(|poll| {
-            poll.cast_vote(block_height, sender, votes)
-                .map_err(ContractError::from)
-        })
-    }
-}
-
 impl Poll {
-    fn try_map<F, E>(self, func: F) -> Result<Self, E>
+    pub fn try_map<F, E>(self, func: F) -> Result<Self, E>
     where
         F: FnOnce(WeightedPoll) -> Result<WeightedPoll, E>,
         E: From<ContractError>,
@@ -69,17 +45,39 @@ impl Poll {
     }
 }
 
-pub const POLL_ID: counter::Counter<PollID> = counter::Counter::new("poll_id");
+#[cw_serde]
+pub struct PollContent<T> {
+    pub content: T, // content is stored for migration purposes in case the hash changes
+    pub poll_id: PollId,
+    pub index_in_poll: u32,
+}
 
-pub const POLLS: Map<PollID, Poll> = Map::new("polls");
+impl PollContent<Message> {
+    pub fn new(message: Message, poll_id: PollId, index_in_poll: usize) -> Self {
+        Self {
+            content: message,
+            poll_id,
+            index_in_poll: index_in_poll.try_into().unwrap(),
+        }
+    }
+}
 
-pub const PENDING_MESSAGES: Map<PollID, Vec<Message>> = Map::new("pending_messages");
+impl PollContent<Operators> {
+    pub fn new(operators: Operators, poll_id: PollId) -> Self {
+        Self {
+            content: operators,
+            poll_id,
+            index_in_poll: 0,
+        }
+    }
+}
 
-pub const VERIFIED_MESSAGES: Map<&CrossChainId, Message> = Map::new("verified_messages");
+pub const POLL_ID: counter::Counter<PollId> = counter::Counter::new("poll_id");
+
+pub const POLLS: Map<PollId, Poll> = Map::new("polls");
+
+pub const POLL_MESSAGES: Map<&Hash, PollContent<Message>> = Map::new("poll_messages");
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
-type OperatorsHash = Vec<u8>;
-pub const CONFIRMED_WORKER_SETS: Map<OperatorsHash, ()> = Map::new("confirmed_worker_sets");
-
-pub const PENDING_WORKER_SETS: Map<PollID, Operators> = Map::new("pending_worker_sets");
+pub const POLL_WORKER_SETS: Map<&Hash, PollContent<Operators>> = Map::new("poll_worker_sets");

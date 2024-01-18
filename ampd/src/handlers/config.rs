@@ -34,6 +34,10 @@ pub enum Config {
         cosmwasm_contract: TMAddress,
         rpc_url: Url,
     },
+    SuiWorkerSetVerifier {
+        cosmwasm_contract: TMAddress,
+        rpc_url: Url,
+    },
     MvxMsgVerifier {
         cosmwasm_contract: TMAddress,
         proxy_url: Url,
@@ -121,9 +125,25 @@ where
     }
 }
 
+fn validate_sui_worker_set_verifier_config<'de, D>(configs: &[Config]) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match configs
+        .iter()
+        .filter(|config| matches!(config, Config::SuiWorkerSetVerifier { .. }))
+        .count()
+    {
+        count if count > 1 => Err(de::Error::custom(
+            "only one Sui worker set verifier config is allowed",
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn validate_mvx_msg_verifier_config<'de, D>(configs: &[Config]) -> Result<(), D::Error>
-    where
-        D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     match configs
         .iter()
@@ -137,10 +157,9 @@ fn validate_mvx_msg_verifier_config<'de, D>(configs: &[Config]) -> Result<(), D:
     }
 }
 
-
 fn validate_mvx_worker_set_verifier_config<'de, D>(configs: &[Config]) -> Result<(), D::Error>
-    where
-        D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     match configs
         .iter()
@@ -164,6 +183,7 @@ where
     validate_evm_worker_set_verifier_configs::<D>(&configs)?;
     validate_multisig_signer_config::<D>(&configs)?;
     validate_sui_msg_verifier_config::<D>(&configs)?;
+    validate_sui_worker_set_verifier_config::<D>(&configs)?;
     validate_mvx_msg_verifier_config::<D>(&configs)?;
     validate_mvx_worker_set_verifier_config::<D>(&configs)?;
 

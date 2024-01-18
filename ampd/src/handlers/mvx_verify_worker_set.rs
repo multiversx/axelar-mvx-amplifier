@@ -5,9 +5,10 @@ use cosmrs::cosmwasm::MsgExecuteContract;
 use error_stack::ResultExt;
 use serde::Deserialize;
 
-use axelar_wasm_std::voting::PollID;
+use axelar_wasm_std::voting::{PollId, Vote};
 use events::{Error::EventTypeMismatch, Event};
 use events_derive::try_from;
+use valuable::Valuable;
 use voting_verifier::msg::ExecuteMsg;
 
 use crate::event_processor::EventHandler;
@@ -44,7 +45,7 @@ struct PollStartedEvent {
     #[serde(rename = "_contract_address")]
     contract_address: TMAddress,
     worker_set: WorkerSetConfirmation,
-    poll_id: PollID,
+    poll_id: PollId,
     source_gateway_address: Address,
     participants: Vec<TMAddress>,
 }
@@ -79,7 +80,7 @@ where
         }
     }
 
-    async fn broadcast_vote(&self, poll_id: PollID, vote: bool) -> Result<()> {
+    async fn broadcast_vote(&self, poll_id: PollId, vote: Vote) -> Result<()> {
         let msg = serde_json::to_vec(&ExecuteMsg::Vote {
             poll_id,
             votes: vec![vote],
@@ -147,10 +148,13 @@ where
         .in_scope(|| {
             info!("ready to verify a new worker set in poll");
 
-            let vote = transaction_info.map_or(false, |transaction| {
+            let vote = transaction_info.map_or(Vote::NotFound, |transaction| {
                 verify_worker_set(&source_gateway_address, &transaction, &worker_set)
             });
-            info!(vote, "ready to vote for a new worker set in poll");
+            info!(
+                vote = vote.as_value(),
+                "ready to vote for a new worker set in poll"
+            );
 
             vote
         });
@@ -176,14 +180,12 @@ mod tests {
     use tokio::test as async_test;
 
     use events::Event;
-    use voting_verifier::events::{
-        PollMetadata, PollStarted, WorkerSetConfirmation,
-    };
+    use voting_verifier::events::{PollMetadata, PollStarted, WorkerSetConfirmation};
 
     use super::PollStartedEvent;
     use crate::event_processor::EventHandler;
     use crate::queue::queued_broadcaster;
-    use crate::types::{TMAddress};
+    use crate::types::TMAddress;
     use cosmrs::AccountId;
     use std::str::FromStr;
 
@@ -324,10 +326,7 @@ mod tests {
         let worker = TMAddress::from(
             AccountId::from_str("axelarvaloper1zh9wrak6ke4n6fclj5e8yk397czv430ygs5jz7").unwrap(),
         );
-        let event = get_event(
-            poll_started_event(),
-            &voting_verifier,
-        );
+        let event = get_event(poll_started_event(), &voting_verifier);
 
         let handler = super::Handler::new(worker, voting_verifier, proxy, broadcast_client);
 

@@ -179,17 +179,20 @@ mod test {
 
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
+    use connection_router::state::ChainName;
     use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
     use cosmrs::{AccountId, Gas};
-    use cosmwasm_std::{Addr, HexBinary, Uint64};
+    use cosmwasm_std::{HexBinary, Uint64};
     use ecdsa::SigningKey;
     use error_stack::{Report, Result};
+    use rand::distributions::Alphanumeric;
     use rand::rngs::OsRng;
+    use rand::Rng;
     use tendermint::abci;
 
     use multisig::events::Event::SigningStarted;
     use multisig::key::PublicKey;
-    use multisig::types::{KeyID, MsgToSign};
+    use multisig::types::MsgToSign;
 
     use crate::broadcaster::MockBroadcaster;
     use crate::queue::queued_broadcaster::{QueuedBroadcaster, QueuedBroadcasterClient};
@@ -219,6 +222,16 @@ mod test {
         HexBinary::from(digest.as_slice())
     }
 
+    fn rand_chain_name() -> ChainName {
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect::<String>()
+            .try_into()
+            .unwrap()
+    }
+
     fn signing_started_event() -> events::Event {
         let pub_keys = (0..10)
             .map(|_| (rand_account().to_string(), rand_public_key()))
@@ -226,12 +239,10 @@ mod test {
 
         let poll_started = SigningStarted {
             session_id: Uint64::one(),
-            key_id: KeyID {
-                owner: Addr::unchecked("sender"),
-                subkey: "key_id".to_string(),
-            },
+            worker_set_id: "worker_set_id".to_string(),
             pub_keys,
             msg: MsgToSign::unchecked(rand_message()),
+            chain_name: rand_chain_name(),
         };
 
         let mut event: cosmwasm_std::Event = poll_started.into();

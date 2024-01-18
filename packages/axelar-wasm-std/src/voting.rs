@@ -24,7 +24,11 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, StdError, StdResult, Uint256, Uint64};
 use cw_storage_plus::{IntKey, Key, KeyDeserialize, PrimaryKey};
 use num_traits::One;
+use strum::EnumIter;
+use strum::EnumString;
+use strum::IntoEnumIterator;
 use thiserror::Error;
+use valuable::Valuable;
 
 use crate::nonempty;
 use crate::Snapshot;
@@ -48,30 +52,33 @@ pub enum Error {
 
     #[error("poll has expired")]
     PollExpired,
+
+    #[error("message index out of bounds")]
+    MessageIndexOutOfBounds,
 }
 
 #[cw_serde]
 #[derive(Copy, Default)]
-pub struct PollID(Uint64);
+pub struct PollId(Uint64);
 
-impl From<PollID> for String {
-    fn from(val: PollID) -> Self {
+impl From<PollId> for String {
+    fn from(val: PollId) -> Self {
         val.0.to_string()
     }
 }
 
-impl From<u64> for PollID {
+impl From<u64> for PollId {
     fn from(value: u64) -> Self {
-        PollID(value.into())
+        PollId(value.into())
     }
 }
-impl From<Uint64> for PollID {
+impl From<Uint64> for PollId {
     fn from(value: Uint64) -> Self {
-        PollID(value)
+        PollId(value)
     }
 }
 
-impl FromStr for PollID {
+impl FromStr for PollId {
     type Err = StdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -79,7 +86,7 @@ impl FromStr for PollID {
     }
 }
 
-impl Mul for PollID {
+impl Mul for PollId {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -87,19 +94,19 @@ impl Mul for PollID {
     }
 }
 
-impl One for PollID {
+impl One for PollId {
     fn one() -> Self {
-        PollID(Uint64::one())
+        PollId(Uint64::one())
     }
 }
 
-impl AddAssign for PollID {
+impl AddAssign for PollId {
     fn add_assign(&mut self, other: Self) {
         self.0 += other.0;
     }
 }
 
-impl<'a> PrimaryKey<'a> for PollID {
+impl<'a> PrimaryKey<'a> for PollId {
     type Prefix = ();
     type SubPrefix = ();
     type Suffix = Self;
@@ -110,7 +117,7 @@ impl<'a> PrimaryKey<'a> for PollID {
     }
 }
 
-impl KeyDeserialize for PollID {
+impl KeyDeserialize for PollId {
     type Output = Self;
 
     fn from_vec(value: Vec<u8>) -> StdResult<Self::Output> {
@@ -122,32 +129,67 @@ impl KeyDeserialize for PollID {
     }
 }
 
-impl fmt::Display for PollID {
+impl fmt::Display for PollId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-pub trait Poll {
-    type E;
+#[cw_serde]
+#[derive(Eq, Hash, Ord, PartialOrd, EnumIter, EnumString, Valuable)]
+pub enum Vote {
+    SucceededOnChain, // the txn was included on chain, and achieved the intended result
+    FailedOnChain,    // the txn was included on chain, but failed to achieve the intended result
+    NotFound,         // the txn could not be found on chain in any blocks at the time of voting
+}
 
-    // errors if the poll cannot be finished
-    fn finish(self, block_height: u64) -> Result<Self, Self::E>
-    where
-        Self: Sized;
-    // returns the cumulated poll result
-    fn result(&self) -> PollResult;
-    // errors if sender is not a participant, if sender already voted, if the poll is finished or
-    // if the number of votes doesn't match the poll size
-    fn cast_vote(self, block_height: u64, sender: &Addr, votes: Vec<bool>) -> Result<Self, Self::E>
-    where
-        Self: Sized;
+impl fmt::Display for Vote {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Vote::SucceededOnChain => write!(f, "SucceededOnChain"),
+            Vote::FailedOnChain => write!(f, "FailedOnChain"),
+            Vote::NotFound => write!(f, "NotFound"),
+        }
+    }
+}
+
+// Deserialization of enums as map keys is not supported by serde-json-wasm, we use String instead
+#[cw_serde]
+pub struct Tallies(BTreeMap<String, Uint256>);
+
+impl Default for Tallies {
+    fn default() -> Self {
+        Self(
+            Vote::iter()
+                .map(|vote| (vote.to_string(), Uint256::zero()))
+                .collect(),
+        )
+    }
+}
+
+impl Tallies {
+    pub fn consensus(&self, quorum: Uint256) -> Option<Vote> {
+        self.0.iter().find_map(|(vote, tally)| {
+            if *tally >= quorum {
+                Some(vote.parse().expect("can't parse vote string back to enum"))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn tally(&mut self, vote: &Vote, weight: &Uint256) {
+        *self
+            .0
+            .get_mut(&vote.to_string())
+            .unwrap_or(&mut Uint256::zero()) += weight;
+    }
 }
 
 #[cw_serde]
-pub struct PollResult {
-    pub poll_id: PollID,
-    pub results: Vec<bool>,
+pub struct PollState {
+    pub poll_id: PollId,
+    pub results: Vec<Option<Vote>>,
     /// List of participants who voted for the winning result
     pub consensus_participants: Vec<String>,
 }
@@ -161,22 +203,22 @@ pub enum PollStatus {
 #[cw_serde]
 pub struct Participation {
     pub weight: nonempty::Uint256,
-    pub vote: Option<Vec<bool>>,
+    pub vote: Option<Vec<Vote>>,
 }
 
 #[cw_serde]
 pub struct WeightedPoll {
-    poll_id: PollID,
-    quorum: nonempty::Uint256,
-    expires_at: u64,
-    poll_size: u64,
-    tallies: Vec<Uint256>, // running tally of weighted votes
-    status: PollStatus,
-    participation: BTreeMap<String, Participation>,
+    pub poll_id: PollId,
+    pub quorum: nonempty::Uint256,
+    pub expires_at: u64,
+    pub poll_size: u64,
+    pub tallies: Vec<Tallies>, // running tally of weighted votes
+    pub status: PollStatus,
+    pub participation: BTreeMap<String, Participation>,
 }
 
 impl WeightedPoll {
-    pub fn new(poll_id: PollID, snapshot: Snapshot, expiry: u64, poll_size: usize) -> Self {
+    pub fn new(poll_id: PollId, snapshot: Snapshot, expiry: u64, poll_size: usize) -> Self {
         // initialize the map with all possible voters so it always have the same size and therefore
         // all voters will use roughly the same amount of gas when casting a vote.
         let participation = snapshot
@@ -198,37 +240,18 @@ impl WeightedPoll {
             quorum: snapshot.quorum,
             expires_at: expiry,
             poll_size: poll_size as u64,
-            tallies: vec![Uint256::zero(); poll_size],
+            tallies: vec![Tallies::default(); poll_size],
             status: PollStatus::InProgress,
             participation,
         }
     }
-}
 
-impl Poll for WeightedPoll {
-    type E = Error;
-
-    fn finish(mut self, block_height: u64) -> Result<Self, Error> {
+    pub fn finish(mut self, block_height: u64) -> Result<Self, Error> {
         if matches!(self.status, PollStatus::Finished { .. }) {
             return Err(Error::PollNotInProgress);
         }
 
-        // TODO: all logic to finish early will be removed from here in the future to allow for late voting until poll expiry
-        let everyone_voted = self
-            .participation
-            .iter()
-            .all(|(_, participation)| participation.vote.is_some());
-
-        let quorum: Uint256 = self.quorum.into();
-        let results: Vec<bool> = self.tallies.iter().map(|tally| *tally >= quorum).collect();
-
-        // TODO: this can be improved further by checking if remaining votes can still change the outcome
-        let quorum_satisfied = results.iter().all(|quorum| *quorum);
-
-        if block_height < self.expires_at
-            // can tally early if all participants voted or quorum was satisfied for all votes in poll
-            && !everyone_voted && !quorum_satisfied
-        {
+        if block_height < self.expires_at {
             return Err(Error::PollNotEnded);
         }
 
@@ -237,16 +260,24 @@ impl Poll for WeightedPoll {
         Ok(self)
     }
 
-    fn result(&self) -> PollResult {
+    pub fn state(&self) -> PollState {
         let quorum: Uint256 = self.quorum.into();
-        let results: Vec<bool> = self.tallies.iter().map(|tally| *tally >= quorum).collect();
+        let results: Vec<Option<Vote>> = self
+            .tallies
+            .iter()
+            .map(|tallies| tallies.consensus(quorum))
+            .collect();
 
         let consensus_participants = self
             .participation
             .iter()
             .filter_map(|(address, participation)| {
-                participation.vote.as_ref().and_then(|vote| {
-                    if *vote == results {
+                participation.vote.as_ref().and_then(|votes| {
+                    let voted_consensus = votes.iter().zip(results.iter()).all(|(vote, result)| {
+                        result.is_none() || Some(vote) == result.as_ref() // if there was no consensus, we don't care about the vote
+                    });
+
+                    if voted_consensus {
                         Some(address.to_owned())
                     } else {
                         None
@@ -255,18 +286,26 @@ impl Poll for WeightedPoll {
             })
             .collect();
 
-        PollResult {
+        PollState {
             poll_id: self.poll_id,
             results,
             consensus_participants,
         }
     }
 
-    fn cast_vote(
+    pub fn consensus(&self, idx: u32) -> Result<Option<Vote>, Error> {
+        Ok(self
+            .tallies
+            .get(idx as usize)
+            .ok_or(Error::MessageIndexOutOfBounds)?
+            .consensus(self.quorum.into()))
+    }
+
+    pub fn cast_vote(
         mut self,
         block_height: u64,
         sender: &Addr,
-        votes: Vec<bool>,
+        votes: Vec<Vote>,
     ) -> Result<Self, Error> {
         let participation = self
             .participation
@@ -285,19 +324,11 @@ impl Poll for WeightedPoll {
             return Err(Error::AlreadyVoted);
         }
 
-        // TODO: this won't be needed anymore once we allow late voting until poll expiry
-        // late votes are not tallied
-        if self.status != PollStatus::InProgress {
-            participation.vote = Some(votes);
-            return Ok(self);
-        }
-
         self.tallies
             .iter_mut()
             .zip(votes.iter())
-            .filter(|(_, vote)| **vote)
-            .for_each(|(tally, _)| {
-                *tally += Uint256::from(participation.weight);
+            .for_each(|(tallies, vote)| {
+                tallies.tally(vote, &participation.weight.into());
             });
 
         participation.vote = Some(votes);
@@ -319,7 +350,7 @@ mod tests {
     #[test]
     fn cast_vote() {
         let poll = new_poll(2, 2, vec!["addr1", "addr2"]);
-        let votes = vec![true, true];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
 
         assert_eq!(
             poll.participation.get("addr1").unwrap(),
@@ -350,7 +381,7 @@ mod tests {
             rng.gen_range(1..50),
             vec!["addr1", "addr2"],
         );
-        let votes = vec![true, true];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
 
         let rand_addr: String = thread_rng()
             .sample_iter(&Alphanumeric)
@@ -371,7 +402,7 @@ mod tests {
             rand::thread_rng().gen_range(1..50),
             vec!["addr1", "addr2"],
         );
-        let votes = vec![true, true];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
         assert_eq!(
             poll.cast_vote(2, &Addr::unchecked("addr1"), votes),
             Err(Error::PollExpired)
@@ -381,7 +412,7 @@ mod tests {
     #[test]
     fn vote_size_is_invalid() {
         let poll = new_poll(2, 2, vec!["addr1", "addr2"]);
-        let votes = vec![true];
+        let votes = vec![Vote::SucceededOnChain];
         assert_eq!(
             poll.cast_vote(1, &Addr::unchecked("addr1"), votes),
             Err(Error::InvalidVoteSize)
@@ -391,7 +422,7 @@ mod tests {
     #[test]
     fn voter_already_voted() {
         let poll = new_poll(2, 2, vec!["addr1", "addr2"]);
-        let votes = vec![true, true];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
 
         let poll = poll
             .cast_vote(1, &Addr::unchecked("addr1"), votes.clone())
@@ -403,57 +434,13 @@ mod tests {
     }
 
     #[test]
-    fn vote_during_grace_period() {
-        let mut poll = new_poll(5, 2, vec!["addr1", "addr2"]);
-        let votes = vec![true, true];
-        poll.status = PollStatus::Finished;
-        let tallies = poll.tallies.clone();
-
-        let poll = poll.cast_vote(2, &Addr::unchecked("addr1"), votes).unwrap();
-        assert_eq!(poll.status, PollStatus::Finished);
-        assert_eq!(poll.tallies, tallies)
-    }
-
-    #[test]
-    fn tally_before_poll_end() {
+    fn finish_before_poll_expiry() {
         let poll = new_poll(1, 2, vec!["addr1", "addr2"]);
         assert_eq!(poll.finish(0), Err(Error::PollNotEnded));
     }
 
     #[test]
-    fn tally_before_expiry_everyone_voted() {
-        let poll = new_poll(1, 2, vec!["addr1", "addr2", "addr3"]);
-        let votes = vec![false, false];
-
-        let poll = poll
-            .cast_vote(0, &Addr::unchecked("addr1"), votes.clone())
-            .unwrap()
-            .cast_vote(0, &Addr::unchecked("addr2"), votes.clone())
-            .unwrap()
-            .cast_vote(0, &Addr::unchecked("addr3"), votes)
-            .unwrap();
-
-        let poll = poll.finish(0).unwrap();
-        assert_eq!(poll.status, PollStatus::Finished);
-    }
-
-    #[test]
-    fn tally_before_expiry_quorum_satisfied() {
-        let poll = new_poll(1, 2, vec!["addr1", "addr2", "addr3"]);
-        let votes = vec![true, true];
-
-        let poll = poll
-            .cast_vote(0, &Addr::unchecked("addr1"), votes.clone())
-            .unwrap()
-            .cast_vote(0, &Addr::unchecked("addr2"), votes)
-            .unwrap();
-
-        let poll = poll.finish(0).unwrap();
-        assert_eq!(poll.status, PollStatus::Finished);
-    }
-
-    #[test]
-    fn tally_after_poll_conclude() {
+    fn finish_after_poll_conclude() {
         let mut poll = new_poll(2, 2, vec!["addr1", "addr2"]);
         poll.status = PollStatus::Finished;
         assert_eq!(poll.finish(2), Err(Error::PollNotInProgress));
@@ -462,7 +449,7 @@ mod tests {
     #[test]
     fn should_conclude_poll() {
         let poll = new_poll(2, 2, vec!["addr1", "addr2", "addr3"]);
-        let votes = vec![true, true];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
 
         let poll = poll
             .cast_vote(1, &Addr::unchecked("addr1"), votes.clone())
@@ -473,12 +460,12 @@ mod tests {
         let poll = poll.finish(2).unwrap();
         assert_eq!(poll.status, PollStatus::Finished);
 
-        let result = poll.result();
+        let result = poll.state();
         assert_eq!(
             result,
-            PollResult {
-                poll_id: PollID::from(Uint64::one()),
-                results: vec![true, true],
+            PollState {
+                poll_id: PollId::from(Uint64::one()),
+                results: vec![Some(Vote::SucceededOnChain), Some(Vote::SucceededOnChain)],
                 consensus_participants: vec!["addr1".to_string(), "addr2".to_string(),],
             }
         );
@@ -487,8 +474,8 @@ mod tests {
     #[test]
     fn result_filters_non_consensus_voters() {
         let poll = new_poll(2, 2, vec!["addr1", "addr2", "addr3"]);
-        let votes = vec![true, true];
-        let wrong_votes = vec![false, false];
+        let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
+        let wrong_votes = vec![Vote::FailedOnChain, Vote::FailedOnChain];
 
         let poll = poll
             .cast_vote(1, &Addr::unchecked("addr1"), votes.clone())
@@ -498,13 +485,13 @@ mod tests {
             .cast_vote(1, &Addr::unchecked("addr3"), votes)
             .unwrap();
 
-        let result = poll.finish(2).unwrap().result();
+        let result = poll.finish(2).unwrap().state();
 
         assert_eq!(
             result,
-            PollResult {
-                poll_id: PollID::from(Uint64::one()),
-                results: vec![true, true],
+            PollState {
+                poll_id: PollId::from(Uint64::one()),
+                results: vec![Some(Vote::SucceededOnChain), Some(Vote::SucceededOnChain)],
                 consensus_participants: vec!["addr1".to_string(), "addr3".to_string(),],
             }
         );
@@ -525,8 +512,8 @@ mod tests {
         let denominator: nonempty::Uint64 = Uint64::from(3u8).try_into().unwrap();
         let threshold: Threshold = (numerator, denominator).try_into().unwrap();
 
-        let snapshot = Snapshot::new(threshold, participants);
+        let snapshot = Snapshot::new(threshold.try_into().unwrap(), participants);
 
-        WeightedPoll::new(PollID::from(Uint64::one()), snapshot, expires_at, poll_size)
+        WeightedPoll::new(PollId::from(Uint64::one()), snapshot, expires_at, poll_size)
     }
 }

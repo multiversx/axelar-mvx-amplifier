@@ -5,7 +5,7 @@ use cosmwasm_std::{
 };
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, CONFIG, CONFIRMED_WORKER_SETS};
+use crate::state::{Config, CONFIG};
 use crate::{execute, query};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -42,27 +42,23 @@ pub fn execute(
         ExecuteMsg::VerifyMessages { messages } => execute::verify_messages(deps, env, messages),
         ExecuteMsg::Vote { poll_id, votes } => execute::vote(deps, env, info, poll_id, votes),
         ExecuteMsg::EndPoll { poll_id } => execute::end_poll(deps, env, poll_id),
-        ExecuteMsg::ConfirmWorkerSet {
+        ExecuteMsg::VerifyWorkerSet {
             message_id,
             new_operators,
-        } => execute::confirm_worker_set(deps, env, message_id, new_operators),
+        } => execute::verify_worker_set(deps, env, message_id, new_operators),
     }
     .map_err(axelar_wasm_std::ContractError::from)
 }
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::IsVerified { messages } => {
-            to_binary(&query::verification_statuses(deps, messages)?)
-        }
+        QueryMsg::IsVerified { messages } => to_binary(&query::is_verified(deps, &messages)?),
 
         QueryMsg::GetPoll { poll_id: _ } => {
             todo!()
         }
-        QueryMsg::IsWorkerSetConfirmed { new_operators } => to_binary(
-            &CONFIRMED_WORKER_SETS
-                .may_load(deps.storage, new_operators.hash())?
-                .is_some(),
-        ),
+        QueryMsg::IsWorkerSetVerified { new_operators } => {
+            to_binary(&query::is_worker_set_verified(deps, &new_operators)?)
+        }
     }
 }

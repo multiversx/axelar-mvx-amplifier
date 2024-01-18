@@ -6,7 +6,7 @@ use cosmrs::cosmwasm::MsgExecuteContract;
 use error_stack::ResultExt;
 use serde::Deserialize;
 
-use axelar_wasm_std::voting::PollID;
+use axelar_wasm_std::voting::{PollId, Vote};
 use events::{Error::EventTypeMismatch, Event};
 use events_derive::try_from;
 use voting_verifier::msg::ExecuteMsg;
@@ -37,7 +37,7 @@ pub struct Message {
 struct PollStartedEvent {
     #[serde(rename = "_contract_address")]
     contract_address: TMAddress,
-    poll_id: PollID,
+    poll_id: PollId,
     source_gateway_address: Address,
     messages: Vec<Message>,
     participants: Vec<TMAddress>,
@@ -73,7 +73,7 @@ where
         }
     }
 
-    async fn broadcast_votes(&self, poll_id: PollID, votes: Vec<bool>) -> Result<()> {
+    async fn broadcast_votes(&self, poll_id: PollId, votes: Vec<Vote>) -> Result<()> {
         let msg = serde_json::to_vec(&ExecuteMsg::Vote { poll_id, votes })
             .expect("vote msg should serialize");
         let tx = MsgExecuteContract {
@@ -136,7 +136,7 @@ where
             .map(|msg| {
                 transactions_info
                     .get(&msg.tx_id)
-                    .map_or(false, |transaction| {
+                    .map_or(Vote::NotFound, |transaction| {
                         verify_message(&source_gateway_address, transaction, msg)
                     })
             })

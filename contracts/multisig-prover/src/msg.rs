@@ -1,4 +1,5 @@
-use axelar_wasm_std::Threshold;
+use axelar_wasm_std::MajorityThreshold;
+use connection_router::state::CrossChainId;
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{HexBinary, Uint256, Uint64};
 use multisig::key::KeyType;
@@ -13,7 +14,7 @@ pub struct InstantiateMsg {
     pub service_registry_address: String,
     pub voting_verifier_address: String,
     pub destination_chain_id: Uint256,
-    pub signing_threshold: Threshold,
+    pub signing_threshold: MajorityThreshold,
     pub service_name: String,
     pub chain_name: String,
     pub worker_set_diff_threshold: u32,
@@ -25,7 +26,7 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     // Start building a proof that includes specified messages
     // Queries the gateway for actual message contents
-    ConstructProof { message_ids: Vec<String> },
+    ConstructProof { message_ids: Vec<CrossChainId> },
     UpdateWorkerSet,
     ConfirmWorkerSet,
 }
@@ -49,7 +50,7 @@ pub enum ProofStatus {
 #[cw_serde]
 pub struct GetProofResponse {
     pub multisig_session_id: Uint64,
-    pub message_ids: Vec<String>,
+    pub message_ids: Vec<CrossChainId>,
     pub data: Data,
     pub status: ProofStatus,
 }

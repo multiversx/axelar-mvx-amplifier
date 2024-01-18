@@ -97,6 +97,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 mod tests {
 
     use anyhow::Error;
+    use axelar_wasm_std::Threshold;
+    use connection_router::state::CrossChainId;
     use cosmwasm_std::{
         testing::{mock_dependencies, mock_env, mock_info},
         Addr, Fraction, Uint256, Uint64,
@@ -143,14 +145,14 @@ mod tests {
 
     fn execute_construct_proof(
         test_case: &mut TestCaseConfig,
-        message_ids: Option<Vec<String>>,
+        message_ids: Option<Vec<CrossChainId>>,
     ) -> Result<AppResponse, Error> {
         let message_ids = match message_ids {
             Some(ids) => ids,
             None => test_data::messages()
                 .into_iter()
-                .map(|msg| msg.cc_id.to_string())
-                .collect::<Vec<String>>(),
+                .map(|msg| msg.cc_id)
+                .collect::<Vec<CrossChainId>>(),
         };
 
         let msg = ExecuteMsg::ConstructProof { message_ids };
@@ -195,12 +197,13 @@ mod tests {
         let service_registry_address = "service_registry_address";
         let voting_verifier_address = "voting_verifier";
         let destination_chain_id = Uint256::one();
-        let signing_threshold = (
+        let signing_threshold = Threshold::try_from((
             test_data::threshold().numerator(),
             test_data::threshold().denominator(),
-        )
-            .try_into()
-            .unwrap();
+        ))
+        .unwrap()
+        .try_into()
+        .unwrap();
         let service_name = "service_name";
         for encoding in vec![Encoder::Abi, Encoder::Bcs, Encoder::Mvx] {
             let mut deps = mock_dependencies();
@@ -527,6 +530,15 @@ mod tests {
 
         let res = execute_construct_proof(&mut test_case, None).unwrap();
 
+        let event = res
+            .events
+            .iter()
+            .find(|event| event.ty == "wasm-proof_under_construction");
+
+        assert!(event.is_some());
+
+        // test case where there is an existing batch
+        let res = execute_construct_proof(&mut test_case, None).unwrap();
         let event = res
             .events
             .iter()

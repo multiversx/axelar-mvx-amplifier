@@ -4,13 +4,15 @@ use cosmrs::cosmwasm::MsgExecuteContract;
 use error_stack::ResultExt;
 use ethers::types::{TransactionReceipt, U64};
 use serde::Deserialize;
+use tokio::sync::watch::Receiver;
 use tracing::{info, info_span};
+use valuable::Valuable;
 
 use async_trait::async_trait;
 use events::Error::EventTypeMismatch;
 use events_derive::try_from;
 
-use axelar_wasm_std::voting::PollID;
+use axelar_wasm_std::voting::{PollId, Vote};
 use connection_router::state::ID_SEPARATOR;
 use voting_verifier::msg::ExecuteMsg;
 
@@ -42,9 +44,10 @@ struct PollStartedEvent {
     #[serde(rename = "_contract_address")]
     contract_address: TMAddress,
     worker_set: WorkerSetConfirmation,
-    poll_id: PollID,
+    poll_id: PollId,
     source_chain: connection_router::state::ChainName,
     source_gateway_address: EVMAddress,
+    expires_at: u64,
     confirmation_height: u64,
     participants: Vec<TMAddress>,
 }
@@ -59,6 +62,7 @@ where
     chain: ChainName,
     rpc_client: C,
     broadcast_client: B,
+    latest_block_height: Receiver<u64>,
 }
 
 impl<C, B> Handler<C, B>
@@ -72,6 +76,7 @@ where
         chain: ChainName,
         rpc_client: C,
         broadcast_client: B,
+        latest_block_height: Receiver<u64>,
     ) -> Self {
         Self {
             worker,
@@ -79,6 +84,7 @@ where
             chain,
             rpc_client,
             broadcast_client,
+            latest_block_height,
         }
     }
 
@@ -112,7 +118,7 @@ where
         }))
     }
 
-    async fn broadcast_vote(&self, poll_id: PollID, vote: bool) -> Result<()> {
+    async fn broadcast_vote(&self, poll_id: PollId, vote: Vote) -> Result<()> {
         let msg = serde_json::to_vec(&ExecuteMsg::Vote {
             poll_id,
             votes: vec![vote],
@@ -146,6 +152,7 @@ where
             poll_id,
             source_chain,
             source_gateway_address,
+            expires_at,
             confirmation_height,
             participants,
             worker_set,
@@ -168,6 +175,12 @@ where
             return Ok(());
         }
 
+        let latest_block_height = *self.latest_block_height.borrow();
+        if latest_block_height >= expires_at {
+            info!(poll_id = poll_id.to_string(), "skipping expired poll");
+            return Ok(());
+        }
+
         let tx_receipt = self
             .finalized_tx_receipt(worker_set.tx_id, confirmation_height)
             .await?;
@@ -183,10 +196,13 @@ where
         .in_scope(|| {
             info!("ready to verify a new worker set in poll");
 
-            let vote = tx_receipt.map_or(false, |tx_receipt| {
+            let vote = tx_receipt.map_or(Vote::NotFound, |tx_receipt| {
                 verify_worker_set(&source_gateway_address, &tx_receipt, &worker_set)
             });
-            info!(vote, "ready to vote for a new worker set in poll");
+            info!(
+                vote = vote.as_value(),
+                "ready to vote for a new worker set in poll"
+            );
 
             vote
         });
@@ -201,6 +217,7 @@ mod tests {
 
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
+    use ethers::providers::ProviderError;
     use tendermint::abci;
 
     use axelar_wasm_std::operators::Operators;
@@ -209,18 +226,74 @@ mod tests {
     use voting_verifier::events::{PollMetadata, PollStarted, WorkerSetConfirmation};
 
     use crate::{
+        event_processor::EventHandler,
+        evm::{json_rpc::MockEthereumClient, ChainName},
         handlers::evm_verify_worker_set::PollStartedEvent,
-        types::{EVMAddress, Hash},
+        queue::queued_broadcaster::MockBroadcasterClient,
+        types::{EVMAddress, Hash, TMAddress},
+        PREFIX,
     };
 
-    fn get_poll_started_event() -> Event {
-        let poll_started = PollStarted::WorkerSet {
+    use error_stack::{Report, Result};
+    use tokio::{sync::watch, test as async_test};
+
+    #[test]
+    fn should_deserialize_correct_event() {
+        let event: Event = get_event(
+            poll_started_event(participants(5, None), 100),
+            &TMAddress::random(PREFIX),
+        );
+        let event: Result<PollStartedEvent, events::Error> = event.try_into();
+
+        assert!(event.is_ok());
+    }
+
+    #[async_test]
+    async fn should_skip_expired_poll() {
+        let mut rpc_client = MockEthereumClient::new();
+        // mock the rpc client as erroring. If the handler successfully ignores the poll, we won't hit this
+        rpc_client.expect_finalized_block().returning(|| {
+            Err(Report::from(ProviderError::CustomError(
+                "failed to get finalized block".to_string(),
+            )))
+        });
+        let broadcast_client = MockBroadcasterClient::new();
+
+        let voting_verifier = TMAddress::random(PREFIX);
+        let worker = TMAddress::random(PREFIX);
+        let expiration = 100u64;
+        let event: Event = get_event(
+            poll_started_event(participants(5, Some(worker.clone())), expiration),
+            &voting_verifier,
+        );
+
+        let (tx, rx) = watch::channel(expiration - 1);
+
+        let handler = super::Handler::new(
+            worker,
+            voting_verifier,
+            ChainName::Ethereum,
+            rpc_client,
+            broadcast_client,
+            rx,
+        );
+
+        // poll is not expired yet, should hit rpc error
+        assert!(handler.handle(&event).await.is_err());
+
+        let _ = tx.send(expiration + 1);
+
+        // poll is expired, should not hit rpc error now
+        assert!(handler.handle(&event).await.is_ok());
+    }
+
+    fn poll_started_event(participants: Vec<TMAddress>, expires_at: u64) -> PollStarted {
+        PollStarted::WorkerSet {
             worker_set: WorkerSetConfirmation {
                 tx_id: format!("0x{:x}", Hash::random()).parse().unwrap(),
                 event_index: 100,
-                operators: Operators {
-                    threshold: 40u64.into(),
-                    weights_by_addresses: vec![
+                operators: Operators::new(
+                    vec![
                         (
                             HexBinary::from(EVMAddress::random().as_bytes()),
                             10u64.into(),
@@ -234,7 +307,8 @@ mod tests {
                             30u64.into(),
                         ),
                     ],
-                },
+                    40u64.into(),
+                ),
             },
             metadata: PollMetadata {
                 poll_id: "100".parse().unwrap(),
@@ -243,27 +317,20 @@ mod tests {
                     .parse()
                     .unwrap(),
                 confirmation_height: 15,
-                expires_at: 100,
-                participants: vec![
-                    cosmwasm_std::Addr::unchecked(
-                        "axelarvaloper1zh9wrak6ke4n6fclj5e8yk397czv430ygs5jz7",
-                    ),
-                    cosmwasm_std::Addr::unchecked(
-                        "axelarvaloper1tee73c83k2vqky9gt59jd3ztwxhqjm27l588q6",
-                    ),
-                    cosmwasm_std::Addr::unchecked(
-                        "axelarvaloper1ds9z59d9szmxlzt6f8f6l6sgaenxdyd6095gcg",
-                    ),
-                ],
+                expires_at,
+                participants: participants
+                    .into_iter()
+                    .map(|addr| cosmwasm_std::Addr::unchecked(addr.to_string()))
+                    .collect(),
             },
-        };
+        }
+    }
 
-        let mut event: cosmwasm_std::Event = poll_started.into();
+    fn get_event(event: impl Into<cosmwasm_std::Event>, contract_address: &TMAddress) -> Event {
+        let mut event: cosmwasm_std::Event = event.into();
+
         event.ty = format!("wasm-{}", event.ty);
-        event = event.add_attribute(
-            "_contract_address",
-            "axelarvaloper1zh9wrak6ke4n6fclj5e8yk397czv430ygs5jz7",
-        );
+        event = event.add_attribute("_contract_address", contract_address.to_string());
 
         abci::Event::new(
             event.ty,
@@ -278,10 +345,11 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn should_deserialize_correct_event() {
-        let event: Result<PollStartedEvent, _> = (&get_poll_started_event()).try_into();
-
-        assert!(event.is_ok());
+    fn participants(n: u8, worker: Option<TMAddress>) -> Vec<TMAddress> {
+        (0..n)
+            .into_iter()
+            .map(|_| TMAddress::random(PREFIX))
+            .chain(worker.into_iter())
+            .collect()
     }
 }

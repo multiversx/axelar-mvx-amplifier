@@ -1,6 +1,7 @@
 use crate::handlers::mvx_verify_msg::Message;
 use crate::handlers::mvx_verify_worker_set::WorkerSetConfirmation;
 use crate::types::Hash;
+use axelar_wasm_std::voting::Vote;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use cosmwasm_std::Uint256;
@@ -157,10 +158,12 @@ pub fn verify_message(
     gateway_address: &Address,
     transaction: &TransactionOnNetwork,
     message: &Message,
-) -> bool {
+) -> Vote {
     match find_event(transaction, gateway_address, message.event_index) {
-        Some(event) => transaction.hash.as_ref().unwrap() == &message.tx_id && event == message,
-        None => false,
+        Some(event) if transaction.hash.as_ref().unwrap() == &message.tx_id && event == message => {
+            Vote::SucceededOnChain
+        }
+        _ => Vote::NotFound,
     }
 }
 
@@ -168,12 +171,14 @@ pub fn verify_worker_set(
     gateway_address: &Address,
     transaction: &TransactionOnNetwork,
     worker_set: &WorkerSetConfirmation,
-) -> bool {
+) -> Vote {
     match find_event(transaction, gateway_address, worker_set.event_index) {
-        Some(event) => {
-            transaction.hash.as_ref().unwrap() == &worker_set.tx_id && event == worker_set
+        Some(event)
+            if transaction.hash.as_ref().unwrap() == &worker_set.tx_id && event == worker_set =>
+        {
+            Vote::SucceededOnChain
         }
-        None => false,
+        _ => Vote::NotFound,
     }
 }
 
@@ -185,7 +190,10 @@ mod tests {
 
     use crate::handlers::mvx_verify_msg::Message;
     use crate::handlers::mvx_verify_worker_set::{Operators, WorkerSetConfirmation};
-    use crate::mvx::verifier::{verify_message, verify_worker_set, CONTRACT_CALL_EVENT, OPERATORSHIP_TRANSFERRED_EVENT, EXECUTE_IDENTIFIER, CONTRACT_CALL_IDENTIFIER};
+    use crate::mvx::verifier::{
+        verify_message, verify_worker_set, CONTRACT_CALL_EVENT, CONTRACT_CALL_IDENTIFIER,
+        EXECUTE_IDENTIFIER, OPERATORSHIP_TRANSFERRED_EVENT,
+    };
     use crate::types::{EVMAddress, Hash};
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
