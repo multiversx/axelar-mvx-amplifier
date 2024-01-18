@@ -16,6 +16,15 @@ const CONTRACT_CALL_EVENT: &str = "contract_call_event";
 const EXECUTE_IDENTIFIER: &str = "execute";
 const OPERATORSHIP_TRANSFERRED_EVENT: &str = "operatorship_transferred_event";
 
+macro_rules! unwrap_or_continue {
+    ( $data:expr ) => {
+        match $data {
+            Some(x) => x,
+            None => continue,
+        }
+    };
+}
+
 macro_rules! unwrap_or_false {
     ( $data:expr ) => {
         match $data {
@@ -134,11 +143,34 @@ fn find_event<'a>(
     transaction: &'a TransactionOnNetwork,
     gateway_address: &Address,
     log_index: usize,
+    identifier: &str,
+    needed_event_name: &[u8],
 ) -> Option<&'a Events> {
     if transaction.logs.is_none() {
         return None;
     }
 
+    // Because of current relayer limitation, if log_index is 0, we will search through the logs and get the first log
+    // which corresponds to the gateway address, hence only supporting one cross chain call per transaction
+    if log_index == 0 {
+        for event in transaction.logs.as_ref().unwrap().events.iter() {
+            if event.address.to_bytes() == gateway_address.to_bytes()
+                && event.identifier == identifier
+            {
+                let topics = unwrap_or_continue!(event.topics.as_ref());
+
+                let event_name = unwrap_or_continue!(topics.get(0));
+                let event_name = STANDARD.decode(event_name).unwrap_or(Vec::new());
+                if event_name.as_slice() == needed_event_name {
+                    return Some(event);
+                }
+            }
+        }
+
+        return None;
+    }
+
+    // Support normal log_index for the future when relayer can be properly implemented
     let event = transaction.logs.as_ref().unwrap().events.get(log_index);
 
     if event.is_none() {
@@ -159,7 +191,13 @@ pub fn verify_message(
     transaction: &TransactionOnNetwork,
     message: &Message,
 ) -> Vote {
-    match find_event(transaction, gateway_address, message.event_index) {
+    match find_event(
+        transaction,
+        gateway_address,
+        message.event_index,
+        CONTRACT_CALL_IDENTIFIER,
+        CONTRACT_CALL_EVENT.as_bytes(),
+    ) {
         Some(event) if transaction.hash.as_ref().unwrap() == &message.tx_id && event == message => {
             Vote::SucceededOnChain
         }
@@ -172,7 +210,13 @@ pub fn verify_worker_set(
     transaction: &TransactionOnNetwork,
     worker_set: &WorkerSetConfirmation,
 ) -> Vote {
-    match find_event(transaction, gateway_address, worker_set.event_index) {
+    match find_event(
+        transaction,
+        gateway_address,
+        worker_set.event_index,
+        EXECUTE_IDENTIFIER,
+        OPERATORSHIP_TRANSFERRED_EVENT.as_bytes(),
+    ) {
         Some(event)
             if transaction.hash.as_ref().unwrap() == &worker_set.tx_id && event == worker_set =>
         {
@@ -195,10 +239,10 @@ mod tests {
         EXECUTE_IDENTIFIER, OPERATORSHIP_TRANSFERRED_EVENT,
     };
     use crate::types::{EVMAddress, Hash};
+    use axelar_wasm_std::voting::Vote;
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
     use cosmwasm_std::{HexBinary, Uint256};
-    use axelar_wasm_std::voting::Vote;
 
     // test verify message
     #[test]
@@ -221,7 +265,7 @@ mod tests {
     fn should_not_verify_msg_if_event_index_does_not_match() {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
-        msg.event_index = 1;
+        msg.event_index = 2;
         assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
@@ -230,7 +274,7 @@ mod tests {
         let (gateway_address, mut tx, msg) = get_matching_msg_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
         event.address = Address::from_bech32_string(
             "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7",
         )
@@ -243,7 +287,7 @@ mod tests {
         let (gateway_address, mut tx, msg) = get_matching_msg_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
         event.identifier = "execute".into();
         assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
@@ -253,7 +297,7 @@ mod tests {
         let (gateway_address, mut tx, msg) = get_matching_msg_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
 
         let topics = event.topics.as_mut().unwrap();
         let topic = topics.get_mut(0).unwrap();
@@ -299,7 +343,21 @@ mod tests {
     #[test]
     fn should_verify_msg_if_correct() {
         let (gateway_address, tx, msg) = get_matching_msg_and_tx();
-        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::SucceededOnChain);
+        assert_eq!(
+            verify_message(&gateway_address, &tx, &msg),
+            Vote::SucceededOnChain
+        );
+    }
+
+    #[test]
+    fn should_verify_msg_if_correct_event_index_0() {
+        let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
+
+        msg.event_index = 0;
+        assert_eq!(
+            verify_message(&gateway_address, &tx, &msg),
+            Vote::SucceededOnChain
+        );
     }
 
     // test verify worker set
@@ -308,7 +366,10 @@ mod tests {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
         worker_set.tx_id = "someotherid".into();
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
@@ -316,15 +377,21 @@ mod tests {
         let (gateway_address, mut tx, worker_set) = get_matching_worker_set_and_tx();
 
         tx.logs = None;
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
     fn should_not_verify_worker_set_if_event_index_does_not_match() {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
-        worker_set.event_index = 1;
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        worker_set.event_index = 2;
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
@@ -332,12 +399,15 @@ mod tests {
         let (gateway_address, mut tx, worker_set) = get_matching_worker_set_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
         event.address = Address::from_bech32_string(
             "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7",
         )
         .unwrap();
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
@@ -345,9 +415,12 @@ mod tests {
         let (gateway_address, mut tx, worker_set) = get_matching_worker_set_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
         event.identifier = "callContract".into();
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
@@ -355,12 +428,15 @@ mod tests {
         let (gateway_address, mut tx, worker_set) = get_matching_worker_set_and_tx();
 
         let events = &mut tx.logs.as_mut().unwrap().events;
-        let event = events.get_mut(0).unwrap();
+        let event = events.get_mut(1).unwrap();
 
         let topics = event.topics.as_mut().unwrap();
         let topic = topics.get_mut(0).unwrap();
         *topic = "otherEvent".into();
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
@@ -368,13 +444,30 @@ mod tests {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
         worker_set.operators.threshold = Uint256::from(10u128);
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::NotFound
+        );
     }
 
     #[test]
     fn should_verify_worker_set_if_correct() {
         let (gateway_address, tx, worker_set) = get_matching_worker_set_and_tx();
-        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::SucceededOnChain);
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::SucceededOnChain
+        );
+    }
+
+    #[test]
+    fn should_verify_worker_set_if_correct_event_index_0() {
+        let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
+
+        worker_set.event_index = 0;
+        assert_eq!(
+            verify_worker_set(&gateway_address, &tx, &worker_set),
+            Vote::SucceededOnChain
+        );
     }
 
     fn get_matching_msg_and_tx() -> (Address, TransactionOnNetwork, Message) {
@@ -390,7 +483,7 @@ mod tests {
 
         let msg = Message {
             tx_id: tx_id.to_string(),
-            event_index: 0,
+            event_index: 1,
             source_address,
             destination_chain: "ethereum".parse().unwrap(),
             destination_address: format!("0x{:x}", EVMAddress::random()).parse().unwrap(),
@@ -400,6 +493,13 @@ mod tests {
         // Only the first 32 bytes matter for data
         let mut data = msg.payload_hash.encode();
         data.append(&mut EVMAddress::random().encode());
+
+        let wrong_event = Events {
+            address: gateway_address.clone(),
+            identifier: CONTRACT_CALL_IDENTIFIER.into(),
+            topics: Some(vec![STANDARD.encode(OPERATORSHIP_TRANSFERRED_EVENT)]), // wrong event name
+            data: None,
+        };
 
         // On MultiversX, topics and data are base64 encoded
         let event = Events {
@@ -422,7 +522,7 @@ mod tests {
             hash: Some(msg.tx_id.clone()),
             logs: Some(ApiLogs {
                 address: other_address.clone(),
-                events: vec![event],
+                events: vec![wrong_event, event],
             }),
             status: "success".into(),
             // The rest are irrelevant but there is no default
@@ -465,7 +565,7 @@ mod tests {
 
         let worker_set = WorkerSetConfirmation {
             tx_id: tx_id.to_string(),
-            event_index: 0,
+            event_index: 1,
             operators: Operators {
                 threshold: Uint256::from(20u64).into(),
                 weights_by_addresses: vec![
@@ -497,6 +597,13 @@ mod tests {
         let data = HexBinary::from_hex("00000002ca5b4abdf9eec1f8e2d12c187d41ddd054c81979cae9e8ee9f4ecab901cac5b6ef637606f3144ee46343ba4a25c261b5c400ade88528e876f3deababa22a444900000002000000010a000000010a0000000114")
             .unwrap();
 
+        let wrong_event = Events {
+            address: gateway_address.clone(),
+            identifier: EXECUTE_IDENTIFIER.into(),
+            topics: Some(vec![STANDARD.encode(CONTRACT_CALL_EVENT)]), // wrong event name
+            data: None,
+        };
+
         // On MultiversX, topics and data are base64 encoded
         let event = Events {
             address: gateway_address.clone(),
@@ -513,7 +620,7 @@ mod tests {
             hash: Some(worker_set.tx_id.clone()),
             logs: Some(ApiLogs {
                 address: other_address.clone(),
-                events: vec![event],
+                events: vec![wrong_event, event],
             }),
             status: "success".into(),
             // The rest are irrelevant but there is no default
