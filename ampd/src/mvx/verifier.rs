@@ -198,6 +198,7 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
     use cosmwasm_std::{HexBinary, Uint256};
+    use axelar_wasm_std::voting::Vote;
 
     // test verify message
     #[test]
@@ -205,7 +206,7 @@ mod tests {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
         msg.tx_id = "someotherid".into();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -213,7 +214,7 @@ mod tests {
         let (gateway_address, mut tx, msg) = get_matching_msg_and_tx();
 
         tx.logs = None;
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -221,7 +222,7 @@ mod tests {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
         msg.event_index = 1;
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -234,7 +235,7 @@ mod tests {
             "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7",
         )
         .unwrap();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -244,7 +245,7 @@ mod tests {
         let events = &mut tx.logs.as_mut().unwrap().events;
         let event = events.get_mut(0).unwrap();
         event.identifier = "execute".into();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -257,7 +258,7 @@ mod tests {
         let topics = event.topics.as_mut().unwrap();
         let topic = topics.get_mut(0).unwrap();
         *topic = "otherEvent".into();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -268,7 +269,7 @@ mod tests {
             "erd1qqqqqqqqqqqqqpgqsvzyz88e8v8j6x3wquatxuztnxjwnw92kkls6rdtzx",
         )
         .unwrap();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -276,7 +277,7 @@ mod tests {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
         msg.destination_chain = "otherchain".parse().unwrap();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -284,7 +285,7 @@ mod tests {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
         msg.destination_address = EVMAddress::random().to_string();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
@@ -292,13 +293,13 @@ mod tests {
         let (gateway_address, tx, mut msg) = get_matching_msg_and_tx();
 
         msg.payload_hash = Hash::random();
-        assert!(!verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::NotFound);
     }
 
     #[test]
     fn should_verify_msg_if_correct() {
         let (gateway_address, tx, msg) = get_matching_msg_and_tx();
-        assert!(verify_message(&gateway_address, &tx, &msg));
+        assert_eq!(verify_message(&gateway_address, &tx, &msg), Vote::SucceededOnChain);
     }
 
     // test verify worker set
@@ -307,7 +308,7 @@ mod tests {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
         worker_set.tx_id = "someotherid".into();
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -315,7 +316,7 @@ mod tests {
         let (gateway_address, mut tx, worker_set) = get_matching_worker_set_and_tx();
 
         tx.logs = None;
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -323,7 +324,7 @@ mod tests {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
         worker_set.event_index = 1;
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -336,7 +337,7 @@ mod tests {
             "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7",
         )
         .unwrap();
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -346,7 +347,7 @@ mod tests {
         let events = &mut tx.logs.as_mut().unwrap().events;
         let event = events.get_mut(0).unwrap();
         event.identifier = "callContract".into();
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -359,7 +360,7 @@ mod tests {
         let topics = event.topics.as_mut().unwrap();
         let topic = topics.get_mut(0).unwrap();
         *topic = "otherEvent".into();
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
@@ -367,13 +368,13 @@ mod tests {
         let (gateway_address, tx, mut worker_set) = get_matching_worker_set_and_tx();
 
         worker_set.operators.threshold = Uint256::from(10u128);
-        assert!(!verify_worker_set(&gateway_address, &tx, &worker_set));
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::NotFound);
     }
 
     #[test]
     fn should_verify_worker_set_if_correct() {
-        let (gateway_address, tx, msg) = get_matching_worker_set_and_tx();
-        assert!(verify_worker_set(&gateway_address, &tx, &msg));
+        let (gateway_address, tx, worker_set) = get_matching_worker_set_and_tx();
+        assert_eq!(verify_worker_set(&gateway_address, &tx, &worker_set), Vote::SucceededOnChain);
     }
 
     fn get_matching_msg_and_tx() -> (Address, TransactionOnNetwork, Message) {

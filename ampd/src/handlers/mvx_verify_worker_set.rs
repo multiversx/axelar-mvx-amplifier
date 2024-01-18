@@ -362,9 +362,8 @@ mod tests {
                     .parse()
                     .unwrap(),
                 event_index: 1,
-                operators: Operators {
-                    threshold: 20u64.into(),
-                    weights_by_addresses: vec![
+                operators: Operators::new(
+                    vec![
                         (
                             HexBinary::from_hex(
                                 "ca5b4abdf9eec1f8e2d12c187d41ddd054c81979cae9e8ee9f4ecab901cac5b6",
@@ -380,7 +379,8 @@ mod tests {
                             Uint256::from(10u128),
                         ),
                     ],
-                },
+                    20u64.into(),
+                ),
             },
             metadata: PollMetadata {
                 poll_id: "100".parse().unwrap(),

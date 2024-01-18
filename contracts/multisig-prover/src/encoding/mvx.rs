@@ -4,12 +4,12 @@ use cosmwasm_std::{HexBinary, Uint256};
 use itertools::Itertools;
 use multisig::key::{PublicKey, Signature};
 use multisig::msg::Signer;
+use multisig::worker_set::WorkerSet;
 use multiversx_sc_codec::top_encode_to_vec_u8;
 use sha3::{Digest, Keccak256};
-use multisig::worker_set::WorkerSet;
 
+use crate::error::ContractError;
 use crate::types::{CommandBatch, Operator};
-use crate::{error::ContractError};
 
 use super::Data;
 
@@ -135,11 +135,7 @@ pub fn make_operators(worker_set: WorkerSet) -> Operators {
             )
         })
         .collect();
-    operators.sort_by_key(|op| op.0.clone());
-    Operators {
-        weights_by_addresses: operators,
-        threshold: worker_set.threshold,
-    }
+    Operators::new(operators, worker_set.threshold)
 }
 
 fn uint256_to_compact_vec(value: Uint256) -> Vec<u8> {
@@ -221,16 +217,19 @@ fn ed25519_key(pub_key: PublicKey) -> Result<HexBinary, ContractError> {
 
 #[cfg(test)]
 mod test {
-    use crate::encoding::mvx::{encode, encode_execute_data, encode_proof, make_command_id, make_operators, msg_digest, uint256_to_compact_vec};
+    use crate::encoding::mvx::{
+        encode, encode_execute_data, encode_proof, make_command_id, make_operators, msg_digest,
+        uint256_to_compact_vec,
+    };
     use crate::encoding::{CommandBatchBuilder, Data};
-    use crate::types::{BatchID, Command, CommandBatch};
+    use crate::types::{BatchId, Command, CommandBatch};
     use crate::{
         encoding::mvx::{command_params, transfer_operatorship_params},
         test::test_data,
     };
-    use connection_router::state::Message;
-    use cosmwasm_std::{HexBinary, Uint256};
     use axelar_wasm_std::operators::Operators;
+    use connection_router::state::{CrossChainId, Message};
+    use cosmwasm_std::{HexBinary, Uint256};
     use multisig::key::Signature;
 
     #[test]
@@ -378,10 +377,7 @@ mod test {
         expected.sort_by_key(|op| op.0.clone());
 
         let operators = make_operators(worker_set.clone());
-        let expected_operators = Operators {
-            weights_by_addresses: expected,
-            threshold: worker_set.threshold,
-        };
+        let expected_operators = Operators::new(expected, worker_set.threshold);
         assert_eq!(operators, expected_operators);
     }
 
@@ -453,7 +449,13 @@ mod test {
 
         let command_batch = CommandBatch {
             message_ids: vec![],
-            id: BatchID::new(&vec!["foobar".to_string()], None),
+            id: BatchId::new(
+                &vec![CrossChainId {
+                    chain: "AXELAR".to_string().try_into().unwrap(),
+                    id: "foobar".to_string().try_into().unwrap(),
+                }],
+                None,
+            ),
             data,
             encoder: crate::encoding::Encoder::Mvx,
         };
