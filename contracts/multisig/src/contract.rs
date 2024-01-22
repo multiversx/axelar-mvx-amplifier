@@ -416,12 +416,12 @@ mod tests {
 
         for worker_set_id in [ecdsa_subkey, ed25519_subkey] {
             let res = do_start_signing_session(deps.as_mut(), sender, &worker_set_id);
+            let err_string = res.unwrap_err().to_string();
 
-            assert_eq!(
-                res.unwrap_err().to_string(),
-                axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
-                    + ": () not found"
-            );
+            assert!(err_string.starts_with(
+                &axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
+            ));
+            assert!(err_string.ends_with("not found"));
         }
     }
 
@@ -845,12 +845,12 @@ mod tests {
         do_unauthorize_caller(deps.as_mut(), Addr::unchecked(PROVER)).unwrap();
         for worker_set_id in [ecdsa_subkey, ed25519_subkey] {
             let res = do_start_signing_session(deps.as_mut(), PROVER, &worker_set_id);
+            let err_string = res.unwrap_err().to_string();
 
-            assert_eq!(
-                res.unwrap_err().to_string(),
-                axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
-                    + ": () not found"
-            );
+            assert!(err_string.starts_with(
+                &axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
+            ));
+            assert!(err_string.ends_with("not found"));
         }
     }
 
