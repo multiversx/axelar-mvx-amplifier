@@ -1,3 +1,15 @@
+# MultiversX
+
+This is a fork of the official [Axelar Amplifier](https://github.com/axelarnetwork/axelar-amplifier/tree/main) adding support for MultiversX blockchain.
+
+At the moment this fork needs to be maintained because MultiversX Rust packages required Rust Nightly version.
+
+This was tested on Rust Nightly 1.76.0 & 1.77.0 but may work on newer versions as well.
+
+### Compile contracts
+
+Run `./scripts/compile-contracts.sh` to compile the contracts using a custom (Rust Optimizer Docker image)[https://github.com/buidly/rust-optimizer] with support for Rust Nightly.
+
 # Axelar Amplifier
 
 The Interchain Amplifier enables developers to permissionlessly set up connections to the Axelar network. Developers gain access to Axelar's interconnected network of chains and can "amplify" their resources by paying the cost equivalent to developing only one connection. They can establish connections between new ecosystems or existing chains to add new network properties, such as improved security or better delivery and availability.
