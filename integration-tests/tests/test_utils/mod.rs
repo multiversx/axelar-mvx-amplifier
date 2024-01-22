@@ -1,3 +1,5 @@
+pub mod mvx;
+
 use axelar_wasm_std::{
     nonempty,
     voting::{PollId, Vote},
@@ -11,12 +13,12 @@ use cosmwasm_std::{
 use cw_multi_test::{App, AppResponse, ContractWrapper, Executor};
 
 use k256::ecdsa;
+use k256::pkcs8::der::Decode;
 use multisig::{
     key::{KeyType, PublicKey},
     worker_set::WorkerSet,
 };
 use multisig_prover::encoding::{make_operators, Encoder};
-use tofn::ecdsa::KeyPair;
 
 pub const AXL_DENOMINATION: &str = "uaxl";
 
@@ -157,24 +159,46 @@ pub fn sign_proof(
             .expect("couldn't get session_id");
 
     for worker in workers {
-        let signature = tofn::ecdsa::sign(
-            worker.key_pair.signing_key(),
-            &HexBinary::from_hex(&msg_to_sign)
-                .unwrap()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        )
-        .unwrap();
+        let signature = match &worker.key_pair {
+            KeyPair::ECDSA(value) => {
+                let signature = tofn::ecdsa::sign(
+                    value.signing_key(),
+                    &HexBinary::from_hex(&msg_to_sign)
+                        .unwrap()
+                        .as_slice()
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
 
-        let sig = ecdsa::Signature::from_der(&signature).unwrap();
+                HexBinary::from(ecdsa::Signature::from_der(&signature).unwrap().to_vec())
+            }
+            KeyPair::ED25519(value) => {
+                let signature = tofn::ed25519::sign(
+                    value,
+                    &HexBinary::from_hex(&msg_to_sign)
+                        .unwrap()
+                        .as_slice()
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
+
+                HexBinary::from(
+                    tofn::ed25519::Asn1Signature::from_der(&signature)
+                        .unwrap()
+                        .signature
+                        .raw_bytes(),
+                )
+            }
+        };
 
         let response = app.execute_contract(
             worker.addr.clone(),
             multisig_address.clone(),
             &multisig::msg::ExecuteMsg::SubmitSignature {
                 session_id,
-                signature: HexBinary::from(sig.to_vec()),
+                signature,
             },
             &[],
         );
@@ -370,12 +394,44 @@ pub fn setup_protocol(service_name: nonempty::String) -> Protocol {
 }
 
 // generates a key pair using the given seed. The key pair should not be used outside of testing
-pub fn generate_key(seed: u32) -> KeyPair {
+pub fn generate_key(seed: u32) -> tofn::ecdsa::KeyPair {
     let seed_bytes = seed.to_be_bytes();
     let mut result = [0; 64];
     result[0..seed_bytes.len()].copy_from_slice(seed_bytes.as_slice());
     let secret_recovery_key = result.as_slice().try_into().unwrap();
     tofn::ecdsa::keygen(&secret_recovery_key, b"tofn nonce").unwrap()
+}
+
+pub fn generate_key_ed25519(seed: u32) -> tofn::ed25519::KeyPair {
+    let seed_bytes = seed.to_be_bytes();
+    let mut result = [0; 64];
+    result[0..seed_bytes.len()].copy_from_slice(seed_bytes.as_slice());
+    let secret_recovery_key = result.as_slice().try_into().unwrap();
+    tofn::ed25519::keygen(&secret_recovery_key, b"tofn nonce").unwrap()
+}
+
+#[derive(Debug)]
+pub enum KeyPair {
+    ECDSA(tofn::ecdsa::KeyPair),
+    ED25519(tofn::ed25519::KeyPair),
+}
+
+impl KeyPair {
+    fn to_ecdsa(&self) -> &tofn::ecdsa::KeyPair {
+        if let KeyPair::ECDSA(value) = self {
+            return value;
+        }
+
+        panic!("Wrong key");
+    }
+
+    fn to_ed25519(&self) -> &tofn::ed25519::KeyPair {
+        if let KeyPair::ED25519(value) = self {
+            return value;
+        }
+
+        panic!("Wrong key");
+    }
 }
 
 pub struct Worker {
@@ -440,9 +496,14 @@ pub fn register_workers(
             worker.addr.clone(),
             multisig.clone(),
             &multisig::msg::ExecuteMsg::RegisterPublicKey {
-                public_key: PublicKey::Ecdsa(HexBinary::from(
-                    worker.key_pair.encoded_verifying_key(),
-                )),
+                public_key: match &worker.key_pair {
+                    KeyPair::ECDSA(value) => {
+                        PublicKey::Ecdsa(HexBinary::from(value.encoded_verifying_key()))
+                    }
+                    KeyPair::ED25519(value) => {
+                        PublicKey::Ed25519(HexBinary::from(value.encoded_verifying_key()))
+                    }
+                },
             },
             &[],
         );
@@ -545,9 +606,18 @@ pub fn workers_to_worker_set(protocol: &mut Protocol, workers: &Vec<Worker>) -> 
     // get public keys
     let mut pub_keys = vec![];
     for worker in workers {
-        let encoded_verifying_key =
-            HexBinary::from(worker.key_pair.encoded_verifying_key().to_vec());
-        let pub_key = PublicKey::try_from((KeyType::Ecdsa, encoded_verifying_key)).unwrap();
+        let pub_key = match &worker.key_pair {
+            KeyPair::ECDSA(value) => {
+                let encoded_verifying_key = HexBinary::from(value.encoded_verifying_key().to_vec());
+                PublicKey::try_from((KeyType::Ecdsa, encoded_verifying_key)).unwrap()
+            }
+            KeyPair::ED25519(value) => {
+                let encoded_verifying_key = HexBinary::from(value.encoded_verifying_key().to_vec());
+
+                PublicKey::try_from((KeyType::Ed25519, encoded_verifying_key)).unwrap()
+            }
+        };
+
         pub_keys.push(pub_key);
     }
 
@@ -838,12 +908,12 @@ pub fn setup_test_case() -> (Protocol, Chain, Chain, Vec<Worker>, Uint128) {
         Worker {
             addr: Addr::unchecked("worker1"),
             supported_chains: chains.clone(),
-            key_pair: generate_key(0),
+            key_pair: KeyPair::ECDSA(generate_key(0)),
         },
         Worker {
             addr: Addr::unchecked("worker2"),
             supported_chains: chains.clone(),
-            key_pair: generate_key(1),
+            key_pair: KeyPair::ECDSA(generate_key(1)),
         },
     ];
     let min_worker_bond = Uint128::new(100);
