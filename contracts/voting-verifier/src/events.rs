@@ -6,7 +6,7 @@ use cosmwasm_std::{Addr, Attribute, Event};
 use axelar_wasm_std::nonempty;
 use axelar_wasm_std::operators::Operators;
 use axelar_wasm_std::voting::{PollId, Vote};
-use connection_router::state::{Address, ChainName, Message, ID_SEPARATOR};
+use connection_router_api::{Address, ChainName, Message, ID_SEPARATOR};
 
 use crate::error::ContractError;
 use crate::state::Config;
@@ -112,13 +112,14 @@ impl From<PollStarted> for Event {
 #[cw_serde]
 pub struct WorkerSetConfirmation {
     pub tx_id: nonempty::String,
-    pub event_index: u64,
+    pub event_index: u32,
     pub operators: Operators,
 }
 
 impl WorkerSetConfirmation {
     pub fn new(message_id: nonempty::String, operators: Operators) -> Result<Self, ContractError> {
         let (tx_id, event_index) = parse_message_id(&message_id)?;
+
         Ok(Self {
             tx_id,
             event_index,
@@ -130,12 +131,12 @@ impl WorkerSetConfirmation {
 #[cw_serde]
 pub struct TxEventConfirmation {
     pub tx_id: nonempty::String,
-    pub event_index: u64,
+    pub event_index: u32,
     pub destination_address: Address,
     pub destination_chain: ChainName,
     pub source_address: Address,
     /// for better user experience, the payload hash gets encoded into hex at the edges (input/output),
-    /// but internally, we treat it as raw bytes to enforce it's format.
+    /// but internally, we treat it as raw bytes to enforce its format.
     #[serde(with = "axelar_wasm_std::hex")]
     #[schemars(with = "String")] // necessary attribute in conjunction with #[serde(with ...)]
     pub payload_hash: [u8; 32],
@@ -160,7 +161,7 @@ impl TryFrom<Message> for TxEventConfirmation {
 
 fn parse_message_id(
     message_id: &nonempty::String,
-) -> Result<(nonempty::String, u64), ContractError> {
+) -> Result<(nonempty::String, u32), ContractError> {
     // expected format: <tx_id>:<index>
     let components = message_id.split(ID_SEPARATOR).collect::<Vec<_>>();
 
@@ -171,7 +172,7 @@ fn parse_message_id(
     Ok((
         components[0].try_into()?,
         components[1]
-            .parse::<u64>()
+            .parse()
             .map_err(|_| ContractError::InvalidMessageID(message_id.to_string()))?,
     ))
 }

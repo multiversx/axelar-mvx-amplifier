@@ -1,12 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdResult,
+    to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdResult,
 };
-
-use std::str::FromStr;
-
-use connection_router::state::ChainName;
 
 use crate::{
     error::ContractError,
@@ -41,7 +37,9 @@ pub fn instantiate(
         destination_chain_id: msg.destination_chain_id,
         signing_threshold: msg.signing_threshold,
         service_name: msg.service_name,
-        chain_name: ChainName::from_str(&msg.chain_name)
+        chain_name: msg
+            .chain_name
+            .parse()
             .map_err(|_| ContractError::InvalidChainName)?,
         worker_set_diff_threshold: msg.worker_set_diff_threshold,
         encoder: msg.encoder,
@@ -57,14 +55,15 @@ pub fn instantiate(
 pub fn execute(
     deps: DepsMut,
     env: Env,
-    _info: MessageInfo,
+    info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, axelar_wasm_std::ContractError> {
     match msg {
-        ExecuteMsg::ConstructProof { message_ids } => {
-            execute::construct_proof(deps, env, message_ids)
+        ExecuteMsg::ConstructProof { message_ids } => execute::construct_proof(deps, message_ids),
+        ExecuteMsg::UpdateWorkerSet {} => {
+            execute::require_admin(&deps, info)?;
+            execute::update_worker_set(deps, env)
         }
-        ExecuteMsg::UpdateWorkerSet {} => execute::update_worker_set(deps, env),
         ExecuteMsg::ConfirmWorkerSet {} => execute::confirm_worker_set(deps),
     }
     .map_err(axelar_wasm_std::ContractError::from)
@@ -88,24 +87,25 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetProof {
             multisig_session_id,
-        } => to_binary(&query::get_proof(deps, multisig_session_id)?),
-        QueryMsg::GetWorkerSet {} => to_binary(&query::get_worker_set(deps)?),
+        } => to_json_binary(&query::get_proof(deps, multisig_session_id)?),
+        QueryMsg::GetWorkerSet {} => to_json_binary(&query::get_worker_set(deps)?),
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use anyhow::Error;
-    use axelar_wasm_std::Threshold;
-    use connection_router::state::CrossChainId;
     use cosmwasm_std::{
         testing::{mock_dependencies, mock_env, mock_info},
         Addr, Fraction, Uint256, Uint64,
     };
     use cw_multi_test::{AppResponse, Executor};
+
+    use axelar_wasm_std::Threshold;
+    use connection_router_api::CrossChainId;
     use multisig::{msg::Signer, worker_set::WorkerSet};
 
+    use crate::contract::execute::should_update_worker_set;
     use crate::{
         encoding::Encoder,
         msg::{GetProofResponse, ProofStatus},
@@ -115,8 +115,6 @@ mod tests {
             test_data::{self, TestOperator},
         },
     };
-
-    use crate::contract::execute::should_update_worker_set;
 
     use super::*;
 
@@ -205,9 +203,9 @@ mod tests {
         .try_into()
         .unwrap();
         let service_name = "service_name";
-        for encoding in vec![Encoder::Abi, Encoder::Bcs, Encoder::Mvx] {
+        for encoding in [Encoder::Abi, Encoder::Bcs, Encoder::Mvx] {
             let mut deps = mock_dependencies();
-            let info = mock_info(&instantiator, &[]);
+            let info = mock_info(instantiator, &[]);
             let env = mock_env();
 
             let msg = InstantiateMsg {
@@ -221,7 +219,7 @@ mod tests {
                 service_name: service_name.to_string(),
                 chain_name: "Ethereum".to_string(),
                 worker_set_diff_threshold: 0,
-                encoder: encoding.clone(),
+                encoder: encoding,
                 key_type: multisig::key::KeyType::Ecdsa,
             };
 
@@ -238,10 +236,7 @@ mod tests {
             assert_eq!(config.multisig, multisig_address);
             assert_eq!(config.service_registry, service_registry_address);
             assert_eq!(config.destination_chain_id, destination_chain_id);
-            assert_eq!(
-                config.signing_threshold,
-                signing_threshold.try_into().unwrap()
-            );
+            assert_eq!(config.signing_threshold, signing_threshold);
             assert_eq!(config.service_name, service_name);
             assert_eq!(config.encoder, encoding)
         }
@@ -251,7 +246,7 @@ mod tests {
         let total_weight: Uint256 = operators
             .iter()
             .fold(Uint256::zero(), |acc, x| acc + x.weight);
-        let quorum = Uint256::try_from(total_weight.mul_ceil(test_data::threshold())).unwrap();
+        let quorum = total_weight.mul_ceil(test_data::threshold());
         WorkerSet {
             signers: operators
                 .into_iter()
@@ -289,6 +284,25 @@ mod tests {
             test_operators_to_worker_set(test_data::operators(), test_case.app.block_info().height);
 
         assert_eq!(worker_set, expected_worker_set);
+    }
+
+    #[test]
+    fn test_update_worker_set_from_non_admin_should_fail() {
+        let mut test_case = setup_test_case();
+        let res = test_case.app.execute_contract(
+            Addr::unchecked("some random address"),
+            test_case.prover_address.clone(),
+            &ExecuteMsg::UpdateWorkerSet {},
+            &[],
+        );
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err()
+                .downcast::<axelar_wasm_std::ContractError>()
+                .unwrap()
+                .to_string(),
+            axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
+        );
     }
 
     #[test]
@@ -431,7 +445,7 @@ mod tests {
         let total_weight: Uint256 = new_worker_set
             .iter()
             .fold(Uint256::zero(), |acc, x| acc + x.weight);
-        let quorum = Uint256::try_from(total_weight.mul_ceil(test_data::threshold())).unwrap();
+        let quorum = total_weight.mul_ceil(test_data::threshold());
         mocks::voting_verifier::confirm_worker_set(
             &mut test_case.app,
             test_case.voting_verifier_address.clone(),
@@ -502,7 +516,7 @@ mod tests {
         let total_weight: Uint256 = new_worker_set
             .iter()
             .fold(Uint256::zero(), |acc, x| acc + x.weight);
-        let quorum = Uint256::try_from(total_weight.mul_ceil(test_data::threshold())).unwrap();
+        let quorum = total_weight.mul_ceil(test_data::threshold());
         mocks::voting_verifier::confirm_worker_set(
             &mut test_case.app,
             test_case.voting_verifier_address.clone(),

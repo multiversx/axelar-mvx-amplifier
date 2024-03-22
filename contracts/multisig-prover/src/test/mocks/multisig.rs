@@ -1,8 +1,10 @@
 use cosmwasm_std::{
-    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult, Uint64,
+    to_json_binary, Addr, Binary, Deps, DepsMut, Env, HexBinary, MessageInfo, Response, StdError,
+    StdResult, Uint64,
 };
 use cw_multi_test::{App, Executor};
 use cw_storage_plus::Map;
+
 use multisig::key::{KeyType, KeyTyped, PublicKey};
 use multisig::{
     msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
@@ -35,13 +37,16 @@ pub fn execute(
             msg: _,
             sig_verifier: _,
             chain_name: _,
-        } => Ok(Response::new().set_data(to_binary(&Uint64::one())?)),
+        } => Ok(Response::new().set_data(to_json_binary(&Uint64::one())?)),
         ExecuteMsg::SubmitSignature {
             session_id: _,
             signature: _,
         } => unimplemented!(),
         ExecuteMsg::RegisterWorkerSet { worker_set: _ } => Ok(Response::default()),
-        ExecuteMsg::RegisterPublicKey { public_key } => {
+        ExecuteMsg::RegisterPublicKey {
+            public_key,
+            signed_sender_address: _,
+        } => {
             PUB_KEYS.save(
                 deps.storage,
                 (info.sender.to_string(), public_key.key_type()),
@@ -64,7 +69,8 @@ pub fn register_pub_keys(app: &mut App, multisig_address: Addr, workers: Vec<Tes
             worker.address,
             multisig_address.clone(),
             &ExecuteMsg::RegisterPublicKey {
-                public_key: worker.pub_key.into(),
+                public_key: worker.pub_key,
+                signed_sender_address: HexBinary::from_hex("00").unwrap(),
             },
             &[],
         )
@@ -74,12 +80,12 @@ pub fn register_pub_keys(app: &mut App, multisig_address: Addr, workers: Vec<Tes
 
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetMultisig { session_id: _ } => to_binary(&query::query_success()),
+        QueryMsg::GetMultisig { session_id: _ } => to_json_binary(&query::query_success()),
         QueryMsg::GetWorkerSet { worker_set_id: _ } => unimplemented!(),
         QueryMsg::GetPublicKey {
             worker_address,
             key_type,
-        } => to_binary(&get_public_key_query_success(
+        } => to_json_binary(&get_public_key_query_success(
             deps,
             worker_address,
             key_type,
@@ -105,7 +111,7 @@ mod query {
                 (
                     Signer {
                         address: op.address,
-                        weight: op.weight.into(),
+                        weight: op.weight,
                         pub_key: op.pub_key,
                     },
                     op.signature,
@@ -126,8 +132,6 @@ mod query {
         worker: String,
         key_type: KeyType,
     ) -> PublicKey {
-        PUB_KEYS
-            .load(deps.storage, (worker, key_type.clone()))
-            .unwrap()
+        PUB_KEYS.load(deps.storage, (worker, key_type)).unwrap()
     }
 }

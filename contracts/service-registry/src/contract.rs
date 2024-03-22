@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Addr, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Response,
+    to_json_binary, Addr, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Response,
     Uint128,
 };
 
@@ -94,10 +94,14 @@ pub fn execute(
                 AuthorizationState::NotAuthorized,
             )
         }
-        ExecuteMsg::DeclareChainSupport {
+        ExecuteMsg::RegisterChainSupport {
             service_name,
             chains,
-        } => execute::declare_chains_support(deps, info, service_name, chains),
+        } => execute::register_chains_support(deps, info, service_name, chains),
+        ExecuteMsg::DeregisterChainSupport {
+            service_name,
+            chains,
+        } => execute::deregister_chains_support(deps, info, service_name, chains),
         ExecuteMsg::BondWorker { service_name } => execute::bond_worker(deps, info, service_name),
         ExecuteMsg::UnbondWorker { service_name } => {
             execute::unbond_worker(deps, env, info, service_name)
@@ -110,7 +114,7 @@ pub fn execute(
 }
 
 pub mod execute {
-    use connection_router::state::ChainName;
+    use connection_router_api::ChainName;
 
     use crate::state::{AuthorizationState, WORKERS, WORKERS_PER_CHAIN};
 
@@ -237,7 +241,7 @@ pub mod execute {
         Ok(Response::new())
     }
 
-    pub fn declare_chains_support(
+    pub fn register_chains_support(
         deps: DepsMut,
         info: MessageInfo,
         service_name: String,
@@ -253,6 +257,27 @@ pub mod execute {
 
         for chain in chains {
             WORKERS_PER_CHAIN.save(deps.storage, (&service_name, &chain, &info.sender), &())?;
+        }
+
+        Ok(Response::new())
+    }
+
+    pub fn deregister_chains_support(
+        deps: DepsMut,
+        info: MessageInfo,
+        service_name: String,
+        chains: Vec<ChainName>,
+    ) -> Result<Response, ContractError> {
+        SERVICES
+            .may_load(deps.storage, &service_name)?
+            .ok_or(ContractError::ServiceNotFound)?;
+
+        WORKERS
+            .may_load(deps.storage, (&service_name, &info.sender))?
+            .ok_or(ContractError::WorkerNotFound)?;
+
+        for chain in chains {
+            WORKERS_PER_CHAIN.remove(deps.storage, (&service_name, &chain, &info.sender));
         }
 
         Ok(Response::new())
@@ -332,22 +357,23 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
         QueryMsg::GetActiveWorkers {
             service_name,
             chain_name,
-        } => to_binary(&query::get_active_workers(deps, service_name, chain_name)?)
+        } => to_json_binary(&query::get_active_workers(deps, service_name, chain_name)?)
             .map_err(|err| err.into()),
         QueryMsg::GetWorker {
             service_name,
             worker,
-        } => to_binary(&query::get_worker(deps, worker, service_name)?).map_err(|err| err.into()),
+        } => to_json_binary(&query::get_worker(deps, worker, service_name)?)
+            .map_err(|err| err.into()),
         QueryMsg::GetService { service_name } => {
-            to_binary(&query::get_service(deps, service_name)?).map_err(|err| err.into())
+            to_json_binary(&query::get_service(deps, service_name)?).map_err(|err| err.into())
         }
     }
 }
 
 pub mod query {
-    use connection_router::state::ChainName;
+    use connection_router_api::ChainName;
 
-    use crate::state::{AuthorizationState, WORKERS, WORKERS_PER_CHAIN};
+    use crate::state::{WeightedWorker, WORKERS, WORKERS_PER_CHAIN, WORKER_WEIGHT};
 
     use super::*;
 
@@ -355,12 +381,12 @@ pub mod query {
         deps: Deps,
         service_name: String,
         chain_name: ChainName,
-    ) -> Result<Vec<Worker>, ContractError> {
+    ) -> Result<Vec<WeightedWorker>, ContractError> {
         let service = SERVICES
             .may_load(deps.storage, &service_name)?
             .ok_or(ContractError::ServiceNotFound)?;
 
-        let workers = WORKERS_PER_CHAIN
+        let workers: Vec<_> = WORKERS_PER_CHAIN
             .prefix((&service_name, &chain_name))
             .range(deps.storage, None, None, Order::Ascending)
             .map(|res| res.and_then(|(addr, _)| WORKERS.load(deps.storage, (&service_name, &addr))))
@@ -371,9 +397,17 @@ pub mod query {
                 _ => false,
             })
             .filter(|worker| worker.authorization_state == AuthorizationState::Authorized)
+            .map(|worker| WeightedWorker {
+                worker_info: worker,
+                weight: WORKER_WEIGHT, // all workers have an identical const weight for now
+            })
             .collect();
 
-        Ok(workers)
+        if workers.len() < service.min_num_workers.into() {
+            Err(ContractError::NotEnoughWorkers)
+        } else {
+            Ok(workers)
+        }
     }
 
     pub fn get_worker(

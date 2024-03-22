@@ -1,13 +1,13 @@
-mod abi;
-mod bcs;
-mod mvx;
+pub mod abi;
+pub mod bcs;
+pub mod mvx;
 
 use axelar_wasm_std::operators::Operators;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{HexBinary, Uint256};
 use sha3::{Digest, Keccak256};
 
-use connection_router::state::{CrossChainId, Message};
+use connection_router_api::{CrossChainId, Message};
 use multisig::{key::Signature, msg::Signer, worker_set::WorkerSet};
 
 use crate::{

@@ -12,15 +12,16 @@ use tracing::{info, info_span};
 use valuable::Valuable;
 
 use axelar_wasm_std::voting::{PollId, Vote};
-use connection_router::state::ID_SEPARATOR;
+use connection_router_api::{ChainName, ID_SEPARATOR};
 use events::Error::EventTypeMismatch;
 use events_derive::try_from;
 use voting_verifier::msg::ExecuteMsg;
 
 use crate::event_processor::EventHandler;
+use crate::evm::finalizer;
+use crate::evm::finalizer::Finalization;
 use crate::evm::json_rpc::EthereumClient;
 use crate::evm::verifier::verify_message;
-use crate::evm::ChainName;
 use crate::handlers::errors::Error;
 use crate::handlers::errors::Error::DeserializeEvent;
 use crate::queue::queued_broadcaster::BroadcasterClient;
@@ -31,9 +32,9 @@ type Result<T> = error_stack::Result<T, Error>;
 #[derive(Deserialize, Debug)]
 pub struct Message {
     pub tx_id: Hash,
-    pub event_index: u64,
+    pub event_index: u32,
     pub destination_address: String,
-    pub destination_chain: connection_router::state::ChainName,
+    pub destination_chain: connection_router_api::ChainName,
     pub source_address: EVMAddress,
     pub payload_hash: Hash,
 }
@@ -41,10 +42,8 @@ pub struct Message {
 #[derive(Deserialize, Debug)]
 #[try_from("wasm-messages_poll_started")]
 struct PollStartedEvent {
-    #[serde(rename = "_contract_address")]
-    contract_address: TMAddress,
     poll_id: PollId,
-    source_chain: connection_router::state::ChainName,
+    source_chain: connection_router_api::ChainName,
     source_gateway_address: EVMAddress,
     confirmation_height: u64,
     expires_at: u64,
@@ -60,6 +59,7 @@ where
     worker: TMAddress,
     voting_verifier: TMAddress,
     chain: ChainName,
+    finalizer_type: Finalization,
     rpc_client: C,
     broadcast_client: B,
     latest_block_height: Receiver<u64>,
@@ -74,6 +74,7 @@ where
         worker: TMAddress,
         voting_verifier: TMAddress,
         chain: ChainName,
+        finalizer_type: Finalization,
         rpc_client: C,
         broadcast_client: B,
         latest_block_height: Receiver<u64>,
@@ -82,6 +83,7 @@ where
             worker,
             voting_verifier,
             chain,
+            finalizer_type,
             rpc_client,
             broadcast_client,
             latest_block_height,
@@ -96,12 +98,11 @@ where
     where
         T: IntoIterator<Item = Hash>,
     {
-        let latest_finalized_block_height = self
-            .chain
-            .finalizer(&self.rpc_client, confirmation_height)
-            .latest_finalized_block_height()
-            .await
-            .change_context(Error::Finalizer)?;
+        let latest_finalized_block_height =
+            finalizer::pick(&self.finalizer_type, &self.rpc_client, confirmation_height)
+                .latest_finalized_block_height()
+                .await
+                .change_context(Error::Finalizer)?;
 
         Ok(join_all(
             tx_hashes
@@ -151,8 +152,11 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &events::Event) -> Result<()> {
+        if !event.is_from_contract(self.voting_verifier.as_ref()) {
+            return Ok(());
+        }
+
         let PollStartedEvent {
-            contract_address,
             poll_id,
             source_chain,
             source_gateway_address,
@@ -166,10 +170,6 @@ where
             }
             event => event.change_context(DeserializeEvent)?,
         };
-
-        if self.voting_verifier != contract_address {
-            return Ok(());
-        }
 
         if self.chain != source_chain {
             return Ok(());
@@ -235,6 +235,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
+    use std::str::FromStr;
 
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
@@ -242,22 +243,22 @@ mod tests {
     use error_stack::{Report, Result};
     use ethers::providers::ProviderError;
     use tendermint::abci;
+    use tokio::sync::watch;
+    use tokio::test as async_test;
 
+    use connection_router_api::ChainName;
     use events::Error::{DeserializationFailed, EventTypeMismatch};
     use events::Event;
-    use tokio::sync::watch;
     use voting_verifier::events::{PollMetadata, PollStarted, TxEventConfirmation};
 
     use crate::event_processor::EventHandler;
+    use crate::evm::finalizer::Finalization;
     use crate::evm::json_rpc::MockEthereumClient;
-    use crate::evm::ChainName;
     use crate::queue::queued_broadcaster::MockBroadcasterClient;
     use crate::types::{EVMAddress, Hash, TMAddress};
     use crate::PREFIX;
 
     use super::PollStartedEvent;
-
-    use tokio::test as async_test;
 
     fn get_poll_started_event(participants: Vec<TMAddress>, expires_at: u64) -> PollStarted {
         PollStarted::Messages {
@@ -382,7 +383,8 @@ mod tests {
         let handler = super::Handler::new(
             worker,
             voting_verifier,
-            ChainName::Ethereum,
+            ChainName::from_str("ethereum").unwrap(),
+            Finalization::RPCFinalizedBlock,
             rpc_client,
             broadcast_client,
             rx,
@@ -418,9 +420,8 @@ mod tests {
 
     fn participants(n: u8, worker: Option<TMAddress>) -> Vec<TMAddress> {
         (0..n)
-            .into_iter()
             .map(|_| TMAddress::random(PREFIX))
-            .chain(worker.into_iter())
+            .chain(worker)
             .collect()
     }
 }

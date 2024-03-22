@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::ops::Mul;
 use std::thread;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use error_stack::{FutureExt, Report, Result, ResultExt};
 use futures::TryFutureExt;
 use k256::sha2::{Digest, Sha256};
 use mockall::automock;
+use num_traits::cast;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tonic::Status;
@@ -40,12 +42,14 @@ pub enum Error {
     TxBuilding,
     #[error("failed to estimate gas")]
     GasEstimation,
+    #[error("failed to estimate fee")]
+    FeeEstimation,
     #[error("broadcast failed")]
     Broadcast,
     #[error("failed to confirm tx inclusion in block")]
     TxConfirmation,
     #[error("failed to execute tx")]
-    ExecutionError { response: TxResponse },
+    Execution { response: TxResponse },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -137,16 +141,14 @@ where
             .change_context(Error::Broadcast)
             .await?;
         let TxResponse {
-            height,
-            txhash: tx_hash,
-            ..
+            txhash: tx_hash, ..
         } = &response;
 
-        info!(height, tx_hash, "broadcasted transaction");
+        info!(tx_hash, "broadcasted transaction");
 
         self.confirm_tx(tx_hash).await?;
 
-        info!(height, tx_hash, "confirmed transaction");
+        info!(tx_hash, "confirmed transaction");
 
         self.acc_sequence += 1;
         Ok(response)
@@ -167,16 +169,17 @@ where
             .change_context(Error::TxBuilding)?;
 
         self.estimate_gas(sim_tx).await.map(|gas| {
-            let gas_adj = (gas as f64 * self.config.gas_adjustment) as u64;
+            let gas_adj = gas as f64 * self.config.gas_adjustment;
 
-            Fee::from_amount_and_gas(
+            Ok(Fee::from_amount_and_gas(
                 Coin {
-                    amount: (gas_adj as f64 * self.config.gas_price.amount).ceil() as u128,
+                    amount: cast((gas_adj.mul(self.config.gas_price.amount)).ceil())
+                        .ok_or(Error::FeeEstimation)?,
                     denom: self.config.gas_price.denom.clone().into(),
                 },
-                gas_adj,
-            )
-        })
+                cast::<f64, u64>(gas_adj).ok_or(Error::FeeEstimation)?,
+            ))
+        })?
     }
 }
 
@@ -201,7 +204,7 @@ where
     async fn confirm_tx(&mut self, tx_hash: &str) -> Result<(), Error> {
         let mut result: Result<(), Status> = Ok(());
 
-        for i in 0..self.config.tx_fetch_max_retries + 1 {
+        for i in 0..self.config.tx_fetch_max_retries.saturating_add(1) {
             if i > 0 {
                 thread::sleep(self.config.tx_fetch_interval)
             }
@@ -250,7 +253,7 @@ fn evaluate_response(response: Result<GetTxResponse, Status>) -> ConfirmationRes
             ..
         }) => match response {
             TxResponse { code: 0, .. } => ConfirmationResult::Success,
-            _ => ConfirmationResult::Critical(Error::ExecutionError { response }),
+            _ => ConfirmationResult::Critical(Error::Execution { response }),
         },
     }
 }
@@ -520,7 +523,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .current_context(),
-            Error::ExecutionError {
+            Error::Execution {
                 response: TxResponse { code: 32, .. }
             }
         ));

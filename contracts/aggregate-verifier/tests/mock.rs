@@ -1,11 +1,13 @@
 use aggregate_verifier::error::ContractError;
-use connection_router::state::{CrossChainId, Message};
+use axelar_wasm_std::VerificationStatus;
+use connection_router_api::{CrossChainId, Message};
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{to_binary, Addr, DepsMut, Env, MessageInfo, Response};
+use cosmwasm_std::{to_json_binary, Addr, DepsMut, Env, MessageInfo, Response};
 use cw_multi_test::{App, ContractWrapper, Executor};
 use cw_storage_plus::Map;
 
-const MOCK_VOTING_VERIFIER_MESSAGES: Map<CrossChainId, bool> = Map::new("voting_verifier_messages");
+const MOCK_VOTING_VERIFIER_MESSAGES: Map<CrossChainId, VerificationStatus> =
+    Map::new("voting_verifier_messages");
 
 #[cw_serde]
 pub enum MockVotingVerifierExecuteMsg {
@@ -27,15 +29,19 @@ pub fn mock_verifier_execute(
             let mut res = vec![];
             for m in messages {
                 match MOCK_VOTING_VERIFIER_MESSAGES.may_load(deps.storage, m.cc_id.clone())? {
-                    Some(b) => res.push((m.cc_id, b)),
-                    None => res.push((m.cc_id, false)),
+                    Some(status) => res.push((m.cc_id, status)),
+                    None => res.push((m.cc_id, VerificationStatus::None)),
                 }
             }
-            Ok(Response::new().set_data(to_binary(&res)?))
+            Ok(Response::new().set_data(to_json_binary(&res)?))
         }
         MockVotingVerifierExecuteMsg::MessagesVerified { messages } => {
             for m in messages {
-                MOCK_VOTING_VERIFIER_MESSAGES.save(deps.storage, m.cc_id, &true)?;
+                MOCK_VOTING_VERIFIER_MESSAGES.save(
+                    deps.storage,
+                    m.cc_id,
+                    &VerificationStatus::SucceededOnChain,
+                )?;
             }
             Ok(Response::new())
         }
@@ -58,19 +64,17 @@ pub fn make_mock_voting_verifier(app: &mut App) -> Addr {
         |_, _, _, _: MockVotingVerifierInstantiateMsg| {
             Ok::<Response, ContractError>(Response::new())
         },
-        |_, _, _: aggregate_verifier::msg::QueryMsg| to_binary(&()),
+        |_, _, _: aggregate_verifier::msg::QueryMsg| to_json_binary(&()),
     );
     let code_id = app.store_code(Box::new(code));
 
-    let contract_address = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("voting_verifier"),
-            &MockVotingVerifierInstantiateMsg {},
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-    contract_address
+    app.instantiate_contract(
+        code_id,
+        Addr::unchecked("voting_verifier"),
+        &MockVotingVerifierInstantiateMsg {},
+        &[],
+        "Contract",
+        None,
+    )
+    .unwrap()
 }
