@@ -27,7 +27,7 @@ pub struct Message {
     pub tx_id: String,
     pub event_index: usize,
     pub destination_address: String,
-    pub destination_chain: connection_router::state::ChainName,
+    pub destination_chain: connection_router_api::ChainName,
     pub source_address: Address,
     pub payload_hash: Hash,
 }

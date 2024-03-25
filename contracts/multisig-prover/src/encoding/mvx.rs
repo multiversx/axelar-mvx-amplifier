@@ -228,7 +228,7 @@ mod test {
         test::test_data,
     };
     use axelar_wasm_std::operators::Operators;
-    use connection_router::state::{CrossChainId, Message};
+    use connection_router_api::{CrossChainId, Message};
     use cosmwasm_std::{HexBinary, Uint256};
     use multisig::key::Signature;
 

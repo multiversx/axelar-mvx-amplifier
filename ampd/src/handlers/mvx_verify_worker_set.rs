@@ -20,7 +20,7 @@ use crate::mvx::proxy::MvxProxy;
 use crate::mvx::verifier::verify_worker_set;
 use multiversx_sdk::data::address::Address;
 
-use connection_router::state::ID_SEPARATOR;
+use connection_router_api::ID_SEPARATOR;
 use cosmwasm_std::{HexBinary, Uint256};
 use tracing::{info, info_span};
 

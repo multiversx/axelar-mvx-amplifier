@@ -551,6 +551,7 @@ mod tests {
             hyperblock_nonce: 1,
             hyperblock_hash: "".into(),
             smart_contract_results: None,
+            processing_type_on_destination: "".into(),
         };
 
         (gateway_address, tx_block, msg)
@@ -649,6 +650,7 @@ mod tests {
             hyperblock_nonce: 1,
             hyperblock_hash: "".into(),
             smart_contract_results: None,
+            processing_type_on_destination: "".into(),
         };
 
         (gateway_address, tx_block, worker_set)

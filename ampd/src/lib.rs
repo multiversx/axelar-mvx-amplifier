@@ -17,11 +17,11 @@ use crate::asyncutil::task::{CancellableTask, TaskError, TaskGroup};
 use broadcaster::{accounts::account, Broadcaster};
 use event_processor::EventHandler;
 use events::Event;
+use multiversx_sdk::blockchain::CommunicationProxy;
 use queue::queued_broadcaster::{QueuedBroadcaster, QueuedBroadcasterDriver};
 use state::StateUpdater;
 use tofnd::grpc::{MultisigClient, SharableEcdsaClient};
 use types::TMAddress;
-use multiversx_sdk::blockchain::{CommunicationProxy};
 
 use crate::config::Config;
 use crate::state::State;
@@ -37,6 +37,7 @@ mod event_sub;
 mod evm;
 mod handlers;
 mod json_rpc;
+mod mvx;
 mod queue;
 pub mod state;
 mod sui;
@@ -44,7 +45,6 @@ mod tm_client;
 mod tofnd;
 mod types;
 mod url;
-mod mvx;
 
 const PREFIX: &str = "axelar";
 const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(3);
@@ -304,7 +304,7 @@ where
                 handlers::config::Config::MvxMsgVerifier {
                     cosmwasm_contract,
                     proxy_url,
-                } => self.configure_handler(
+                } => self.create_handler_task(
                     "mvx-msg-verifier",
                     handlers::mvx_verify_msg::Handler::new(
                         worker.clone(),
@@ -312,11 +312,12 @@ where
                         CommunicationProxy::new(proxy_url.to_string()),
                         self.broadcaster.client(),
                     ),
+                    stream_timeout,
                 ),
                 handlers::config::Config::MvxWorkerSetVerifier {
                     cosmwasm_contract,
                     proxy_url,
-                } => self.configure_handler(
+                } => self.create_handler_task(
                     "mvx-worker-set-verifier",
                     handlers::mvx_verify_worker_set::Handler::new(
                         worker.clone(),
@@ -324,6 +325,7 @@ where
                         CommunicationProxy::new(proxy_url.to_string()),
                         self.broadcaster.client(),
                     ),
+                    stream_timeout,
                 ),
             };
             self.event_processor = self.event_processor.add_task(task);

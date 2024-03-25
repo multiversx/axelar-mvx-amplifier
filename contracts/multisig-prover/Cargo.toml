@@ -59,7 +59,7 @@ service-registry = { workspace = true }
 sha3 = { workspace = true }
 thiserror = { workspace = true }
 voting-verifier = { workspace = true, features = ["library"] }
-multiversx-sc-codec = "0.18.3"
+multiversx-sc-codec = "0.18.6"
 bech32 = "0.9.1"
 
 [dev-dependencies]

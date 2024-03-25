@@ -4,7 +4,7 @@ This is a fork of the official [Axelar Amplifier](https://github.com/axelarnetwo
 
 At the moment this fork needs to be maintained because MultiversX Rust packages required Rust Nightly version.
 
-This was tested on Rust Nightly 1.76.0 & 1.77.0 but may work on newer versions as well.
+This was tested on Rust Nightly 1.79.0 (nightly-2024-03-21-x86_64-unknown-linux-gnu) but may work on newer versions as well.
 
 ### Compile contracts
 
