@@ -27,6 +27,7 @@ use multisig::{
 use multisig_prover::encoding::{make_operators, Encoder};
 use rewards::state::PoolId;
 use service_registry::msg::ExecuteMsg;
+use k256::pkcs8::der::Decode;
 
 pub const AXL_DENOMINATION: &str = "uaxl";
 
@@ -445,12 +446,29 @@ pub fn register_workers(protocol: &mut Protocol, workers: &Vec<Worker>, min_work
 
         let address_hash = Keccak256::digest(worker.addr.as_bytes());
 
-        let sig = tofn::ecdsa::sign(
-            worker.key_pair.signing_key(),
-            &address_hash.as_slice().try_into().unwrap(),
-        )
-        .unwrap();
-        let sig = ecdsa::Signature::from_der(&sig).unwrap();
+        let sig = match &worker.key_pair {
+            KeyPair::ECDSA(value) => {
+                let sig = tofn::ecdsa::sign(
+                    value.signing_key(),
+                    &address_hash.as_slice().try_into().unwrap(),
+                ).unwrap();
+
+                HexBinary::from(ecdsa::Signature::from_der(&sig).unwrap().to_vec())
+            }
+            KeyPair::ED25519(value) => {
+                let sig = tofn::ed25519::sign(
+                    value,
+                    &address_hash.as_slice().try_into().unwrap(),
+                ).unwrap();
+
+                HexBinary::from(
+                    tofn::ed25519::Asn1Signature::from_der(&sig)
+                        .unwrap()
+                        .signature
+                        .raw_bytes(),
+                )
+            }
+        };
 
         let response = protocol.multisig.execute(
             &mut protocol.app,
@@ -464,7 +482,7 @@ pub fn register_workers(protocol: &mut Protocol, workers: &Vec<Worker>, min_work
                         PublicKey::Ed25519(HexBinary::from(value.encoded_verifying_key()))
                     }
                 },
-                signed_sender_address: HexBinary::from(sig.to_vec()),
+                signed_sender_address: sig,
             },
         );
         assert!(response.is_ok());

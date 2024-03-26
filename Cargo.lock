@@ -3947,6 +3947,7 @@ dependencies = [
  "cosmwasm-storage",
  "cw-multi-test",
  "cw-storage-plus 1.2.0",
+ "ed25519 2.2.3",
  "error-stack",
  "gateway",
  "gateway-api",

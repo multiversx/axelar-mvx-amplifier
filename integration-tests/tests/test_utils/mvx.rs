@@ -1,117 +1,154 @@
-use crate::test_utils::{generate_key, instantiate_gateway, instantiate_multisig_prover, instantiate_voting_verifier, register_service, register_workers, setup_chain, setup_protocol, Chain, KeyPair, Protocol, Worker, AXL_DENOMINATION, PollExpiryBlock, get_worker_set_poll_id_and_expiry, generate_key_ed25519};
-use axelar_wasm_std::{nonempty, Participant, Threshold};
-use connection_router::state::ChainName;
-use cosmwasm_std::{coins, Addr, HexBinary, Uint128, Uint256};
+use cosmwasm_std::{Addr, coins, HexBinary, Uint128, Uint256};
 use cw_multi_test::{App, AppResponse, ContractWrapper, Executor};
+
+use axelar_wasm_std::{nonempty, Participant, Threshold};
 use axelar_wasm_std::voting::PollId;
+use connection_router_api::{ChainName, CrossChainId, Message};
+use integration_tests::{connection_router_contract::ConnectionRouterContract, protocol::Protocol};
+use integration_tests::contract::Contract;
+use integration_tests::gateway_contract::GatewayContract;
+use integration_tests::multisig_prover_contract::MultisigProverContract;
+use integration_tests::voting_verifier_contract::VotingVerifierContract;
 use multisig::key::{KeyType, PublicKey};
 use multisig::worker_set::WorkerSet;
 use multisig_prover::encoding::{Encoder, make_operators};
+use rewards::state::PoolId;
+
+use crate::test_utils::{advance_at_least_to_height, AXL_DENOMINATION, Chain, create_worker_set_poll, end_poll, generate_key, generate_key_ed25519, get_worker_set_poll_id_and_expiry, KeyPair, PollExpiryBlock, register_service, register_workers, setup_chain, setup_protocol, vote_true_for_worker_set, Worker, workers_to_worker_set};
 
 pub fn create_worker_set_poll_mvx(
     app: &mut App,
     relayer_addr: Addr,
-    voting_verifier: Addr,
+    voting_verifier: &VotingVerifierContract,
     worker_set: WorkerSet,
 ) -> (PollId, PollExpiryBlock) {
-    let response = app.execute_contract(
+    let response = voting_verifier.execute(
+        app,
         relayer_addr.clone(),
-        voting_verifier.clone(),
         &voting_verifier::msg::ExecuteMsg::VerifyWorkerSet {
             message_id: "multiversx:00".parse().unwrap(),
             new_operators: make_operators(worker_set.clone(), Encoder::Mvx),
         },
-        &[],
     );
     assert!(response.is_ok());
 
     get_worker_set_poll_id_and_expiry(response.unwrap())
 }
 
+pub fn execute_worker_set_poll_mvx(
+    protocol: &mut Protocol,
+    relayer_addr: &Addr,
+    voting_verifier: &VotingVerifierContract,
+    new_workers: &Vec<Worker>,
+) {
+    // Create worker set
+    let new_worker_set = workers_to_worker_set(protocol, new_workers);
+
+    // Create worker set poll
+    let (poll_id, expiry) = create_worker_set_poll_mvx(
+        &mut protocol.app,
+        relayer_addr.clone(),
+        voting_verifier,
+        new_worker_set.clone(),
+    );
+
+    // Vote for the worker set
+    vote_true_for_worker_set(&mut protocol.app, voting_verifier, new_workers, poll_id);
+
+    // Advance to expiration height
+    advance_at_least_to_height(&mut protocol.app, expiry);
+
+    // End the poll
+    end_poll(&mut protocol.app, voting_verifier, poll_id);
+}
+
 pub fn setup_chain_mvx(protocol: &mut Protocol, chain_name: ChainName) -> Chain {
-    let voting_verifier_address = instantiate_voting_verifier(
+    let voting_verifier = VotingVerifierContract::instantiate_contract(
         &mut protocol.app,
-        voting_verifier::msg::InstantiateMsg {
-            service_registry_address: protocol
-                .service_registry_address
-                .to_string()
-                .try_into()
-                .unwrap(),
-            service_name: protocol.service_name.clone(),
-            source_gateway_address: "doesn't matter".to_string().try_into().unwrap(),
-            voting_threshold: Threshold::try_from((9, 10)).unwrap().try_into().unwrap(),
-            block_expiry: 10,
-            confirmation_height: 5,
-            source_chain: chain_name.clone(),
-            rewards_address: protocol.rewards_address.to_string(),
-        },
+        protocol
+            .service_registry
+            .contract_addr
+            .to_string()
+            .try_into()
+            .unwrap(),
+        protocol.service_name.clone(),
+        "doesn't matter".to_string().try_into().unwrap(),
+        Threshold::try_from((9, 10)).unwrap().try_into().unwrap(),
+        chain_name.clone(),
+        protocol.rewards.contract_addr.clone(),
     );
-    let gateway_address = instantiate_gateway(
+
+    let gateway = GatewayContract::instantiate_contract(
         &mut protocol.app,
-        gateway::msg::InstantiateMsg {
-            router_address: protocol.router_address.to_string(),
-            verifier_address: voting_verifier_address.to_string(),
-        },
+        protocol.connection_router.contract_address().clone(),
+        voting_verifier.contract_addr.clone(),
     );
-    let multisig_prover_address = instantiate_multisig_prover(
+
+    let multisig_prover_admin = Addr::unchecked(chain_name.to_string() + "prover_admin");
+    let multisig_prover = MultisigProverContract::instantiate_contract_mvx(
+        protocol,
+        multisig_prover_admin.clone(),
+        gateway.contract_addr.clone(),
+        voting_verifier.contract_addr.clone(),
+        chain_name.to_string(),
+    );
+
+    let response = multisig_prover.execute(
         &mut protocol.app,
-        multisig_prover::msg::InstantiateMsg {
-            admin_address: Addr::unchecked("doesn't matter").to_string(),
-            gateway_address: gateway_address.to_string(),
-            multisig_address: protocol.multisig_address.to_string(),
-            service_registry_address: protocol.service_registry_address.to_string(),
-            voting_verifier_address: voting_verifier_address.to_string(),
-            destination_chain_id: Uint256::zero(),
-            signing_threshold: Threshold::try_from((2, 3)).unwrap().try_into().unwrap(),
-            service_name: protocol.service_name.to_string(),
-            chain_name: chain_name.to_string(),
-            worker_set_diff_threshold: 1,
-            encoder: multisig_prover::encoding::Encoder::Mvx,
-            key_type: multisig::key::KeyType::Ed25519,
-        },
-    );
-    let response = protocol.app.execute_contract(
-        Addr::unchecked("doesn't matter"),
-        multisig_prover_address.clone(),
+        multisig_prover_admin,
         &multisig_prover::msg::ExecuteMsg::UpdateWorkerSet,
-        &[],
     );
     assert!(response.is_ok());
-    let response = protocol.app.execute_contract(
+
+    let response = protocol.multisig.execute(
+        &mut protocol.app,
         protocol.governance_address.clone(),
-        protocol.multisig_address.clone(),
         &multisig::msg::ExecuteMsg::AuthorizeCaller {
-            contract_address: multisig_prover_address.clone(),
+            contract_address: multisig_prover.contract_addr.clone(),
         },
-        &[],
     );
     assert!(response.is_ok());
 
-    let response = protocol.app.execute_contract(
+    let response = protocol.connection_router.execute(
+        &mut protocol.app,
         protocol.governance_address.clone(),
-        protocol.router_address.clone(),
-        &connection_router::msg::ExecuteMsg::RegisterChain {
+        &connection_router_api::msg::ExecuteMsg::RegisterChain {
             chain: chain_name.clone(),
-            gateway_address: gateway_address.to_string(),
+            gateway_address: gateway.contract_addr.to_string().try_into().unwrap(),
         },
-        &[],
     );
     assert!(response.is_ok());
 
-    let response = protocol.app.execute_contract(
+    let response = protocol.rewards.execute_with_funds(
+        &mut protocol.app,
         protocol.genesis_address.clone(),
-        protocol.rewards_address.clone(),
         &rewards::msg::ExecuteMsg::AddRewards {
-            contract_address: voting_verifier_address.to_string(),
+            pool_id: PoolId {
+                chain_name: chain_name.clone(),
+                contract: voting_verifier.contract_addr.clone(),
+            },
+        },
+        &coins(1000, AXL_DENOMINATION),
+    );
+    assert!(response.is_ok());
+
+    let response = protocol.rewards.execute_with_funds(
+        &mut protocol.app,
+        protocol.genesis_address.clone(),
+        &rewards::msg::ExecuteMsg::AddRewards {
+            pool_id: PoolId {
+                chain_name: chain_name.clone(),
+                contract: protocol.multisig.contract_addr.clone(),
+            },
         },
         &coins(1000, AXL_DENOMINATION),
     );
     assert!(response.is_ok());
 
     Chain {
-        gateway_address,
-        voting_verifier_address,
-        multisig_prover_address,
+        gateway,
+        voting_verifier,
+        multisig_prover,
         chain_name,
     }
 }
@@ -147,34 +184,10 @@ pub fn setup_test_case_mvx() -> (Protocol, Chain, Chain, Vec<Worker>, Vec<Worker
         },
     ];
     let min_worker_bond = Uint128::new(100);
-    register_service(
-        &mut protocol.app,
-        protocol.service_registry_address.clone(),
-        protocol.governance_address.clone(),
-        protocol.service_name.clone(),
-        min_worker_bond.clone(),
-    );
+    register_service(&mut protocol, min_worker_bond);
 
-    register_workers(
-        &mut protocol.app,
-        protocol.service_registry_address.clone(),
-        protocol.multisig_address.clone(),
-        protocol.governance_address.clone(),
-        protocol.genesis_address.clone(),
-        &workers_evm,
-        protocol.service_name.clone(),
-        min_worker_bond,
-    );
-    register_workers(
-        &mut protocol.app,
-        protocol.service_registry_address.clone(),
-        protocol.multisig_address.clone(),
-        protocol.governance_address.clone(),
-        protocol.genesis_address.clone(),
-        &workers_mvx,
-        protocol.service_name.clone(),
-        min_worker_bond,
-    );
+    register_workers(&mut protocol, &workers_evm, min_worker_bond);
+    register_workers(&mut protocol, &workers_mvx, min_worker_bond);
 
     let chain_evm = setup_chain(&mut protocol, chains.get(0).unwrap().clone());
     let chain_mvx = setup_chain_mvx(&mut protocol, chains.get(1).unwrap().clone());

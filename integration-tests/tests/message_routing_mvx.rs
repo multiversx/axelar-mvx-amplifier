@@ -1,9 +1,12 @@
-use connection_router::state::{CrossChainId, Message};
 use cosmwasm_std::{Addr, HexBinary, Uint128};
+use cw_multi_test::Executor;
+
+use connection_router_api::{CrossChainId, Message};
+use integration_tests::{connection_router_contract::ConnectionRouterContract, protocol::Protocol};
+use test_utils::{Chain, Worker};
 
 use crate::test_utils::AXL_DENOMINATION;
-use cw_multi_test::Executor;
-use test_utils::{Chain, Protocol, Worker};
+
 mod test_utils;
 
 #[test]
@@ -27,7 +30,7 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
             .to_string()
             .try_into()
             .unwrap(),
-        destination_chain: chain_mvx.chain_name,
+        destination_chain: chain_mvx.chain_name.clone(),
         payload_hash: HexBinary::from_hex(
             "3e50a012285f8e7ec59b558179cd546c55c477ebe16202aac7d7747e25be03be",
         )
@@ -40,12 +43,12 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
 
     // start the flow by submitting the message to the gateway
     let (poll_id, expiry) =
-        test_utils::verify_messages(&mut protocol.app, &chain_evm.gateway_address, &msgs);
+        test_utils::verify_messages(&mut protocol.app, &chain_evm.gateway, &msgs);
 
     // do voting
     test_utils::vote_success_for_all_messages(
         &mut protocol.app,
-        &chain_evm.voting_verifier_address,
+        &chain_evm.voting_verifier,
         &msgs,
         &workers_evm,
         poll_id,
@@ -53,30 +56,25 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
 
     test_utils::advance_at_least_to_height(&mut protocol.app, expiry);
 
-    test_utils::end_poll(&mut protocol.app, &chain_evm.voting_verifier_address, poll_id);
+    test_utils::end_poll(&mut protocol.app, &chain_evm.voting_verifier, poll_id);
 
     // should be verified, now route
-    test_utils::route_messages(&mut protocol.app, &chain_evm.gateway_address, &msgs);
+    test_utils::route_messages(&mut protocol.app, &chain_evm.gateway, &msgs);
 
     // check that the message can be found at the outgoing gateway
     let found_msgs =
-        test_utils::get_messages_from_gateway(&mut protocol.app, &chain_mvx.gateway_address, &msg_ids);
+        test_utils::get_messages_from_gateway(&mut protocol.app, &chain_mvx.gateway, &msg_ids);
     assert_eq!(found_msgs, msgs);
 
     // trigger signing and submit all necessary signatures
     let session_id = test_utils::construct_proof_and_sign(
-        &mut protocol.app,
-        &chain_mvx.multisig_prover_address,
-        &protocol.multisig_address,
+        &mut protocol,
+        &chain_mvx.multisig_prover,
         &msgs,
         &workers_mvx,
     );
 
-    let proof = test_utils::get_proof(
-        &mut protocol.app,
-        &chain_mvx.multisig_prover_address,
-        &session_id,
-    );
+    let proof = test_utils::get_proof(&mut protocol.app, &chain_mvx.multisig_prover, &session_id);
 
     // proof should be complete by now
     assert!(matches!(
@@ -92,14 +90,15 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
     );
 
     test_utils::distribute_rewards(
-        &mut protocol.app,
-        &protocol.rewards_address,
-        &chain_evm.voting_verifier_address,
+        &mut protocol,
+        &chain_evm.chain_name,
+        chain_evm.voting_verifier.contract_addr.clone(),
     );
+    let protocol_multisig_address = protocol.multisig.contract_addr.clone();
     test_utils::distribute_rewards(
-        &mut protocol.app,
-        &protocol.rewards_address,
-        &protocol.multisig_address,
+        &mut protocol,
+        &chain_mvx.chain_name,
+        protocol_multisig_address,
     );
 
     // rewards split evenly amongst all workers, but there are two contracts that rewards should have been distributed for
@@ -151,21 +150,21 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
         payload_hash: HexBinary::from_hex(
             "3e50a012285f8e7ec59b558179cd546c55c477ebe16202aac7d7747e25be03be",
         )
-            .unwrap()
-            .as_slice()
-            .try_into()
-            .unwrap(),
+        .unwrap()
+        .as_slice()
+        .try_into()
+        .unwrap(),
     }];
     let msg_ids: Vec<CrossChainId> = msgs.iter().map(|msg| msg.cc_id.clone()).collect();
 
     // start the flow by submitting the message to the gateway
     let (poll_id, expiry) =
-        test_utils::verify_messages(&mut protocol.app, &chain_mvx.gateway_address, &msgs);
+        test_utils::verify_messages(&mut protocol.app, &chain_mvx.gateway, &msgs);
 
     // do voting
     test_utils::vote_success_for_all_messages(
         &mut protocol.app,
-        &chain_mvx.voting_verifier_address,
+        &chain_mvx.voting_verifier,
         &msgs,
         &workers_mvx,
         poll_id,
@@ -173,13 +172,13 @@ fn single_message_can_be_verified_and_routed_and_proven_and_rewards_are_distribu
 
     test_utils::advance_at_least_to_height(&mut protocol.app, expiry);
 
-    test_utils::end_poll(&mut protocol.app, &chain_mvx.voting_verifier_address, poll_id);
+    test_utils::end_poll(&mut protocol.app, &chain_mvx.voting_verifier, poll_id);
 
     // should be verified, now route
-    test_utils::route_messages(&mut protocol.app, &chain_mvx.gateway_address, &msgs);
+    test_utils::route_messages(&mut protocol.app, &chain_mvx.gateway, &msgs);
 
     // check that the message can be found at the outgoing gateway
     let found_msgs =
-        test_utils::get_messages_from_gateway(&mut protocol.app, &chain_evm.gateway_address, &msg_ids);
+        test_utils::get_messages_from_gateway(&mut protocol.app, &chain_evm.gateway, &msg_ids);
     assert_eq!(found_msgs, msgs);
 }
