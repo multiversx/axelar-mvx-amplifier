@@ -228,7 +228,7 @@ mod test {
         test::test_data,
     };
     use axelar_wasm_std::operators::Operators;
-    use connection_router_api::{CrossChainId, Message};
+    use connection_router_api::{CHAIN_NAME_DELIMITER, CrossChainId, Message};
     use cosmwasm_std::{HexBinary, Uint256};
     use multisig::key::Signature;
 
@@ -295,7 +295,9 @@ mod test {
         let mut builder = CommandBatchBuilder::new(1u128.into(), crate::encoding::Encoder::Mvx);
         let _ = builder
             .add_message(Message {
-                cc_id: "ethereum:foobar:1".parse().unwrap(),
+                cc_id: format!("ethereum{}id1", CHAIN_NAME_DELIMITER)
+                    .parse()
+                    .unwrap(),
                 destination_address:
                     "erd1qqqqqqqqqqqqqpgqhe8t5jewej70zupmh44jurgn29psua5l2jps3ntjj3"
                         .parse()
@@ -312,7 +314,9 @@ mod test {
         let mut builder = CommandBatchBuilder::new(1u128.into(), crate::encoding::Encoder::Mvx);
         let _ = builder
             .add_message(Message {
-                cc_id: "ethereum:foobar:2".parse().unwrap(),
+                cc_id: format!("ethereum{}id2", CHAIN_NAME_DELIMITER)
+                    .parse()
+                    .unwrap(),
                 destination_address:
                     "erd1qqqqqqqqqqqqqpgqvc7gdl0p4s97guh498wgz75k8sav6sjfjlwqh679jy"
                         .parse()

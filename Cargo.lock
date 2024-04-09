@@ -4162,7 +4162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4364,6 +4364,25 @@ dependencies = [
  "proc-macro2 1.0.79",
  "quote 1.0.35",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "monitoring"
+version = "0.1.0"
+dependencies = [
+ "axelar-wasm-std",
+ "axelar-wasm-std-derive",
+ "connection-router-api",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-multi-test",
+ "cw-storage-plus 1.2.0",
+ "error-stack",
+ "integration-tests",
+ "multisig",
+ "report",
+ "thiserror",
 ]
 
 [[package]]
@@ -4846,6 +4865,7 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cosmwasm-storage",
+ "curve25519-dalek 4.1.2",
  "cw-multi-test",
  "cw-storage-plus 1.2.0",
  "ed25519-dalek",
@@ -5125,6 +5145,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
+ "voting-verifier",
 ]
 
 [[package]]

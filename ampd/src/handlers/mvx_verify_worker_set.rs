@@ -20,9 +20,9 @@ use crate::mvx::proxy::MvxProxy;
 use crate::mvx::verifier::verify_worker_set;
 use multiversx_sdk::data::address::Address;
 
-use connection_router_api::ID_SEPARATOR;
 use cosmwasm_std::{HexBinary, Uint256};
 use tracing::{info, info_span};
+use voting_verifier::events::TX_HASH_EVENT_INDEX_SEPARATOR;
 
 type Result<T> = error_stack::Result<T, Error>;
 
@@ -142,7 +142,7 @@ where
             poll_id = poll_id.to_string(),
             id = format!(
                 "{}{}{}",
-                worker_set.tx_id, ID_SEPARATOR, worker_set.event_index
+                worker_set.tx_id, TX_HASH_EVENT_INDEX_SEPARATOR, worker_set.event_index
             )
         )
         .in_scope(|| {

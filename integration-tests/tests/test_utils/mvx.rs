@@ -26,7 +26,7 @@ pub fn create_worker_set_poll_mvx(
         app,
         relayer_addr.clone(),
         &voting_verifier::msg::ExecuteMsg::VerifyWorkerSet {
-            message_id: "multiversx:00".parse().unwrap(),
+            message_id: "multiversx-0".parse().unwrap(),
             new_operators: make_operators(worker_set.clone(), Encoder::Mvx),
         },
     );
@@ -64,18 +64,10 @@ pub fn execute_worker_set_poll_mvx(
 
 pub fn setup_chain_mvx(protocol: &mut Protocol, chain_name: ChainName) -> Chain {
     let voting_verifier = VotingVerifierContract::instantiate_contract(
-        &mut protocol.app,
-        protocol
-            .service_registry
-            .contract_addr
-            .to_string()
-            .try_into()
-            .unwrap(),
-        protocol.service_name.clone(),
+        protocol,
         "doesn't matter".to_string().try_into().unwrap(),
         Threshold::try_from((9, 10)).unwrap().try_into().unwrap(),
         chain_name.clone(),
-        protocol.rewards.contract_addr.clone(),
     );
 
     let gateway = GatewayContract::instantiate_contract(
