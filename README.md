@@ -4,7 +4,19 @@ This is a fork of the official [Axelar Amplifier](https://github.com/axelarnetwo
 
 At the moment this fork needs to be maintained because MultiversX Rust packages required Rust Nightly version.
 
-This was tested on Rust Nightly 1.79.0 (nightly-2024-03-21-x86_64-unknown-linux-gnu) but may work on newer versions as well.
+This was tested on Rust Nightly 1.79.0 (nightly-2024-04-07-x86_64-unknown-linux-gnu) but may work on newer versions as well.
+
+## ampd
+
+This fork provides an updated Dockerfile for ampd which uses Rust Nightly version in order to run a Validator for MultiversX.
+
+Find the built Docker Images on (Docker Hub)[https://hub.docker.com/r/raresbuidly/axelar-mvx-amplifier].
+
+To build this image and push it to Docker Hub one can use:
+
+`docker build . -f ampd/Dockerfile --tag raresbuidly/axelar-mvx-amplifier:VERSION`
+
+`docker push raresbuidly/axelar-mvx-amplifier:VERSION`
 
 ### Compile contracts
 

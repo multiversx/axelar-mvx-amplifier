@@ -1,4 +1,4 @@
-FROM rust:1.75-bookworm as builder
+FROM rustlang/rust:nightly-bookworm as builder
 RUN apt-get update && apt-get install -y clang protobuf-compiler
 
 WORKDIR /ampd
@@ -21,6 +21,7 @@ COPY ./ampd/build.rs ./ampd/build.rs
 RUN cargo install --locked --path ./ampd
 
 FROM debian:bookworm-slim AS runner
+RUN apt-get update && apt-get install -y openssl
 RUN addgroup --system --gid 1001 axelard && adduser --home /home/axelard --system --uid 1000 --ingroup axelard axelard
 WORKDIR /home/axelard
 RUN mkdir /.ampd && chown axelard /.ampd
