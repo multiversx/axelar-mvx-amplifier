@@ -57,3 +57,4 @@ sha3 = { workspace = true }
 thiserror = { workspace = true }
 tofn = { git = "https://github.com/axelarnetwork/tofn.git", branch = "update-deps" }
 voting-verifier = { workspace = true }
+ed25519 = "2.2.3"

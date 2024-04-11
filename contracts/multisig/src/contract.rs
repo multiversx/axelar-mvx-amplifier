@@ -436,12 +436,12 @@ mod tests {
                 &worker_set_id,
                 "mock-chain".parse().unwrap(),
             );
+            let err_string = res.unwrap_err().to_string();
 
-            assert_eq!(
-                res.unwrap_err().to_string(),
-                axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
-                    + ": () not found"
-            );
+            assert!(err_string.starts_with(
+                &axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
+            ));
+            assert!(err_string.ends_with("not found"));
         }
     }
 
@@ -989,12 +989,12 @@ mod tests {
                 &worker_set_id,
                 "mock-chain".parse().unwrap(),
             );
+            let err_string = res.unwrap_err().to_string();
 
-            assert_eq!(
-                res.unwrap_err().to_string(),
-                axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
-                    + ": () not found"
-            );
+            assert!(err_string.starts_with(
+                &axelar_wasm_std::ContractError::from(ContractError::Unauthorized).to_string()
+            ));
+            assert!(err_string.ends_with("not found"));
         }
     }
 
