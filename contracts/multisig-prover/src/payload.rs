@@ -9,7 +9,7 @@ use multisig::verifier_set::VerifierSet;
 use router_api::{CrossChainId, Message};
 
 use crate::{
-    encoding::{abi, Encoder},
+    encoding::{abi, mvx, Encoder},
     error::ContractError,
 };
 
@@ -46,6 +46,7 @@ impl Payload {
         match encoder {
             Encoder::Abi => abi::payload_hash_to_sign(domain_separator, cur_verifier_set, self),
             Encoder::Bcs => todo!(),
+            Encoder::Mvx => mvx::payload_hash_to_sign(domain_separator, cur_verifier_set, self),
         }
     }
 
@@ -63,13 +64,14 @@ impl Payload {
         signers_with_sigs: Vec<SignerWithSig>,
         payload: &Payload,
     ) -> Result<HexBinary, ContractError> {
-        let payload_hash = payload.digest(encoder, domain_separator, verifier_set)?;
-
         match encoder {
             Encoder::Abi => {
+                let payload_hash = payload.digest(encoder, domain_separator, verifier_set)?;
+
                 abi::execute_data::encode(verifier_set, signers_with_sigs, &payload_hash, payload)
             }
             Encoder::Bcs => todo!(),
+            Encoder::Mvx => mvx::execute_data::encode(verifier_set, signers_with_sigs, payload)
         }
     }
 }
