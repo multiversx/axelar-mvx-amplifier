@@ -131,23 +131,11 @@ impl TryFrom<&RouterMessage> for Message {
     type Error = ContractError;
 
     fn try_from(msg: &RouterMessage) -> Result<Self, Self::Error> {
-        let map_addr_err = |_| ContractError::InvalidMessage {
-            reason: format!(
-                "destination_address is not a valid MVX address: {}",
-                msg.destination_address.as_str()
-            ),
-        };
-
-        let (_, data, _) =
-            bech32::decode(&msg.destination_address.as_str()).map_err(map_addr_err)?;
-        let addr_vec = Vec::<u8>::from_base32(&data).map_err(map_addr_err)?;
+        let (_, data, _) = bech32::decode(&msg.destination_address.as_str())
+            .map_err(|_| ContractError::InvalidMessage)?;
+        let addr_vec = Vec::<u8>::from_base32(&data).map_err(|_| ContractError::InvalidMessage)?;
         let contract_address =
-            <[u8; 32]>::try_from(addr_vec).map_err(|_| ContractError::InvalidMessage {
-                reason: format!(
-                    "destination_address is not a valid MVX address: {}",
-                    msg.destination_address.as_str()
-                ),
-            })?;
+            <[u8; 32]>::try_from(addr_vec).map_err(|_| ContractError::InvalidMessage)?;
 
         Ok(Message {
             source_chain: msg.cc_id.chain.to_string(),
@@ -188,7 +176,7 @@ pub fn payload_hash_to_sign(
     domain_separator: &Hash,
     signer: &VerifierSet,
     payload: &Payload,
-) -> Result<Hash, ContractError> {
+) -> error_stack::Result<Hash, ContractError> {
     let signer_hash = WeightedSigners::from(signer).hash();
     let data_hash = Keccak256::digest(encode(payload)?);
 
@@ -348,9 +336,7 @@ mod tests {
         assert!(gateway_message.is_err());
         assert_eq!(
             gateway_message.unwrap_err().to_string(),
-            axelar_wasm_std::ContractError::from(ContractError::InvalidMessage {
-                reason: "destination_address is not a valid MVX address: 0x52444f1835Adc02086c37Cb226561605e2E1699b".into(),
-            })
+            axelar_wasm_std::ContractError::from(ContractError::InvalidMessage)
             .to_string()
         );
     }

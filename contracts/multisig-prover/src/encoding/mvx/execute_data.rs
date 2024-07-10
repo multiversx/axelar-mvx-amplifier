@@ -65,7 +65,7 @@ pub fn encode(
     verifier_set: &VerifierSet,
     signers: Vec<SignerWithSig>,
     payload: &Payload,
-) -> Result<HexBinary, ContractError> {
+) -> error_stack::Result<HexBinary, ContractError> {
     let proof = Proof::new(verifier_set, signers);
 
     let data = match payload {
