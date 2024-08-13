@@ -28,7 +28,6 @@ use tracing::{info, info_span};
 #[derive(Deserialize, Debug)]
 pub struct VerifierSetConfirmation {
     pub tx_id: Hash,
-    pub event_index: u32,
     pub verifier_set: VerifierSet,
 }
 
@@ -128,7 +127,7 @@ where
         let vote = info_span!(
             "verify a new verifier set for MultiversX",
             poll_id = poll_id.to_string(),
-            id = format!("{}_{}", verifier_set.tx_id, verifier_set.event_index)
+            id = format!("{}", verifier_set.tx_id)
         )
         .in_scope(|| {
             info!("ready to verify a new worker set in poll");
@@ -169,7 +168,7 @@ mod tests {
 
     use super::PollStartedEvent;
     use crate::event_processor::EventHandler;
-    use crate::handlers::tests::get_event;
+    use crate::handlers::tests::into_structured_event;
     use crate::types::TMAddress;
     use crate::PREFIX;
     use multisig::key::KeyType;
@@ -178,7 +177,7 @@ mod tests {
 
     #[test]
     fn should_deserialize_verifier_set_poll_started_event() {
-        let event: Result<PollStartedEvent, events::Error> = get_event(
+        let event: Result<PollStartedEvent, events::Error> = into_structured_event(
             verifier_set_poll_started_event(participants(5, None), 100),
             &TMAddress::random(PREFIX),
         )
@@ -200,7 +199,6 @@ mod tests {
             verifier_set.tx_id.encode_hex::<String>()
                 == "dfaf64de66510723f2efbacd7ead3c4f8c856aed1afc2cb30254552aeda47312"
         );
-        assert!(verifier_set.event_index == 1u32);
         assert!(verifier_set.verifier_set.signers.len() == 3);
         assert_eq!(verifier_set.verifier_set.threshold, Uint128::from(2u128));
 
@@ -223,7 +221,7 @@ mod tests {
 
     #[async_test]
     async fn not_poll_started_event() {
-        let event = get_event(
+        let event = into_structured_event(
             cosmwasm_std::Event::new("transfer"),
             &TMAddress::random(PREFIX),
         );
@@ -240,7 +238,7 @@ mod tests {
 
     #[async_test]
     async fn contract_is_not_voting_verifier() {
-        let event = get_event(
+        let event = into_structured_event(
             verifier_set_poll_started_event(participants(5, None), 100),
             &TMAddress::random(PREFIX),
         );
@@ -258,7 +256,7 @@ mod tests {
     #[async_test]
     async fn verifier_is_not_a_participant() {
         let voting_verifier = TMAddress::random(PREFIX);
-        let event = get_event(
+        let event = into_structured_event(
             verifier_set_poll_started_event(participants(5, None), 100),
             &voting_verifier,
         );
@@ -283,7 +281,7 @@ mod tests {
         let voting_verifier = TMAddress::random(PREFIX);
         let verifier = TMAddress::random(PREFIX);
         let expiration = 100u64;
-        let event: Event = get_event(
+        let event: Event = into_structured_event(
             verifier_set_poll_started_event(
                 vec![verifier.clone()].into_iter().collect(),
                 expiration,
@@ -315,7 +313,7 @@ mod tests {
         let voting_verifier = TMAddress::random(PREFIX);
         let worker = TMAddress::random(PREFIX);
 
-        let event = get_event(
+        let event = into_structured_event(
             verifier_set_poll_started_event(participants(5, Some(worker.clone())), 100),
             &voting_verifier,
         );
@@ -350,7 +348,7 @@ mod tests {
                 tx_id: "dfaf64de66510723f2efbacd7ead3c4f8c856aed1afc2cb30254552aeda47312"
                     .parse()
                     .unwrap(),
-                event_index: 1,
+                event_index: 0,
                 verifier_set: build_verifier_set(KeyType::Ed25519, &ed25519_test_data::signers()),
             },
         }
@@ -358,9 +356,8 @@ mod tests {
 
     fn participants(n: u8, worker: Option<TMAddress>) -> Vec<TMAddress> {
         (0..n)
-            .into_iter()
             .map(|_| TMAddress::random(PREFIX))
-            .chain(worker.into_iter())
+            .chain(worker)
             .collect()
     }
 }

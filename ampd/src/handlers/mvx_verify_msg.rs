@@ -27,7 +27,6 @@ type Result<T> = error_stack::Result<T, Error>;
 #[derive(Deserialize, Debug)]
 pub struct Message {
     pub tx_id: Hash,
-    pub event_index: u32,
     pub destination_address: String,
     pub destination_chain: router_api::ChainName,
     pub source_address: Address,
@@ -120,10 +119,7 @@ where
             return Ok(vec![]);
         }
 
-        let tx_hashes: HashSet<_> = messages
-            .iter()
-            .map(|message| message.tx_id.clone())
-            .collect();
+        let tx_hashes: HashSet<_> = messages.iter().map(|message| message.tx_id).collect();
         let transactions_info = self
             .blockchain
             .transactions_info_with_results(tx_hashes)
@@ -162,7 +158,7 @@ mod tests {
     use voting_verifier::events::{PollMetadata, PollStarted, TxEventConfirmation};
 
     use crate::event_processor::EventHandler;
-    use crate::handlers::tests::get_event;
+    use crate::handlers::tests::into_structured_event;
     use crate::mvx::proxy::MockMvxProxy;
     use crate::types::{EVMAddress, Hash, TMAddress};
     use crate::PREFIX;
@@ -172,7 +168,7 @@ mod tests {
 
     #[test]
     fn should_deserialize_poll_started_event() {
-        let event: Result<PollStartedEvent, events::Error> = get_event(
+        let event: Result<PollStartedEvent, events::Error> = into_structured_event(
             poll_started_event(participants(5, None)),
             &TMAddress::random(PREFIX),
         )
@@ -188,14 +184,13 @@ mod tests {
                 == "erd1qqqqqqqqqqqqqpgqsvzyz88e8v8j6x3wquatxuztnxjwnw92kkls6rdtzx"
         );
 
-        let message = event.messages.get(0).unwrap();
+        let message = event.messages.first().unwrap();
 
         assert!(
             message.tx_id.encode_hex::<String>()
                 == "dfaf64de66510723f2efbacd7ead3c4f8c856aed1afc2cb30254552aeda47312",
         );
-        assert!(message.event_index == 1u32);
-        assert!(message.destination_chain.to_string() == "ethereum");
+        assert!(message.destination_chain == "ethereum");
         assert!(
             message.source_address.to_bech32_string().unwrap()
                 == "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7"
@@ -205,7 +200,7 @@ mod tests {
     // Should not handle event if it is not a poll started event
     #[async_test]
     async fn not_poll_started_event() {
-        let event = get_event(
+        let event = into_structured_event(
             cosmwasm_std::Event::new("transfer"),
             &TMAddress::random(PREFIX),
         );
@@ -223,7 +218,7 @@ mod tests {
     // Should not handle event if it is not emitted from voting verifier
     #[async_test]
     async fn contract_is_not_voting_verifier() {
-        let event = get_event(
+        let event = into_structured_event(
             poll_started_event(participants(5, None)),
             &TMAddress::random(PREFIX),
         );
@@ -242,7 +237,8 @@ mod tests {
     #[async_test]
     async fn verifier_is_not_a_participant() {
         let voting_verifier = TMAddress::random(PREFIX);
-        let event = get_event(poll_started_event(participants(5, None)), &voting_verifier);
+        let event =
+            into_structured_event(poll_started_event(participants(5, None)), &voting_verifier);
 
         let handler = super::Handler::new(
             TMAddress::random(PREFIX),
@@ -263,7 +259,7 @@ mod tests {
 
         let voting_verifier = TMAddress::random(PREFIX);
         let worker = TMAddress::random(PREFIX);
-        let event = get_event(
+        let event = into_structured_event(
             poll_started_event(participants(5, Some(worker.clone()))),
             &voting_verifier,
         );
@@ -285,7 +281,7 @@ mod tests {
         let voting_verifier = TMAddress::random(PREFIX);
         let worker = TMAddress::random(PREFIX);
         let expiration = 100u64;
-        let event = get_event(
+        let event = into_structured_event(
             poll_started_event(participants(5, Some(worker.clone()))),
             &voting_verifier,
         );
@@ -324,7 +320,7 @@ mod tests {
                 tx_id: "dfaf64de66510723f2efbacd7ead3c4f8c856aed1afc2cb30254552aeda47312"
                     .parse()
                     .unwrap(),
-                event_index: 1,
+                event_index: 0,
                 source_address: "erd1qqqqqqqqqqqqqpgqzqvm5ywqqf524efwrhr039tjs29w0qltkklsa05pk7"
                     .parse()
                     .unwrap(),
@@ -337,9 +333,8 @@ mod tests {
 
     fn participants(n: u8, worker: Option<TMAddress>) -> Vec<TMAddress> {
         (0..n)
-            .into_iter()
             .map(|_| TMAddress::random(PREFIX))
-            .chain(worker.into_iter())
+            .chain(worker)
             .collect()
     }
 }

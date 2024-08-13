@@ -15,17 +15,14 @@ pub enum State {
 }
 
 /// Sets the initial state of the killswitch. Should be called during contract instantiation
-pub fn init(storage: &mut dyn cosmwasm_std::Storage, initial_state: State) -> StdResult<()> {
+pub fn init(storage: &mut dyn Storage, initial_state: State) -> StdResult<()> {
     STATE.save(storage, &initial_state)
 }
 
 /// Sets the killswitch state to `Engaged`. If the state was previously `Disengaged`,
 /// adds the on_state_changed event to the response. Returns an error if the killswitch
 /// was not initialized via `init`
-pub fn engage(
-    storage: &mut dyn cosmwasm_std::Storage,
-    on_state_change: impl Into<Event>,
-) -> StdResult<Response> {
+pub fn engage(storage: &mut dyn Storage, on_state_change: impl Into<Event>) -> StdResult<Response> {
     let state = STATE.update(storage, |state| match state {
         State::Disengaged => Ok(State::Engaged),
         State::Engaged => Err(KillSwitchUpdateError::SameState),
@@ -38,7 +35,7 @@ pub fn engage(
 /// adds the on_state_changed event to the response. Returns an error if the killswitch
 /// was not initialized via `init`
 pub fn disengage(
-    storage: &mut dyn cosmwasm_std::Storage,
+    storage: &mut dyn Storage,
     on_state_change: impl Into<Event>,
 ) -> StdResult<Response> {
     let state = STATE.update(storage, |state| match state {
@@ -78,7 +75,8 @@ const STATE: Item<State> = Item::new("state");
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::{testing::mock_dependencies, Event};
+    use cosmwasm_std::testing::mock_dependencies;
+    use cosmwasm_std::Event;
 
     use crate::killswitch::{disengage, engage, init, is_contract_active, State, STATE};
 

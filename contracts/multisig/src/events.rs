@@ -4,10 +4,8 @@ use cosmwasm_std::{Addr, HexBinary, Uint64};
 use router_api::ChainName;
 use serde_json::to_string;
 
-use crate::{
-    key::{PublicKey, Signature},
-    types::MsgToSign,
-};
+use crate::key::{PublicKey, Signature};
+use crate::types::MsgToSign;
 
 pub enum Event {
     // Emitted when a new signing session is open
@@ -29,6 +27,7 @@ pub enum Event {
     SigningCompleted {
         session_id: Uint64,
         completed_at: u64,
+        chain_name: ChainName,
     },
     PublicKeyRegistered {
         verifier: Addr,
@@ -78,9 +77,11 @@ impl From<Event> for cosmwasm_std::Event {
             Event::SigningCompleted {
                 session_id,
                 completed_at,
+                chain_name,
             } => cosmwasm_std::Event::new("signing_completed")
                 .add_attribute("session_id", session_id)
-                .add_attribute("completed_at", completed_at.to_string()),
+                .add_attribute("completed_at", completed_at.to_string())
+                .add_attribute("chain", chain_name),
             Event::PublicKeyRegistered {
                 verifier,
                 public_key,

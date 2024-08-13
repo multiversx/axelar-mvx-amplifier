@@ -14,27 +14,20 @@
    on whether the transaction was successfully verified.
 */
 use std::array::TryFromSliceError;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::ops::Add;
-use std::ops::Mul;
+use std::ops::{Add, Mul};
 use std::str::FromStr;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, StdError, StdResult, Uint128, Uint64};
-use cw_storage_plus::Prefixer;
-use cw_storage_plus::{IntKey, Key, KeyDeserialize, PrimaryKey};
-use num_traits::CheckedAdd;
-use num_traits::One;
-use strum::EnumIter;
-use strum::EnumString;
-use strum::IntoEnumIterator;
+use cw_storage_plus::{IntKey, Key, KeyDeserialize, Prefixer, PrimaryKey};
+use num_traits::{CheckedAdd, One};
+use strum::{EnumIter, EnumString, IntoEnumIterator};
 use thiserror::Error;
 use valuable::Valuable;
 
-use crate::nonempty;
-use crate::Snapshot;
+use crate::{nonempty, Snapshot};
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -418,11 +411,10 @@ impl WeightedPoll {
 mod tests {
     use cosmwasm_std::{Addr, Uint64};
     use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
-
-    use crate::{nonempty, Participant, Threshold};
+    use rand::Rng;
 
     use super::*;
+    use crate::{nonempty, Participant, Threshold};
 
     #[test]
     fn cast_vote() {
@@ -452,7 +444,7 @@ mod tests {
 
     #[test]
     fn voter_not_a_participant() {
-        let mut rng = thread_rng();
+        let mut rng = rand::thread_rng();
         let poll = new_poll(
             rng.gen::<u64>(),
             rng.gen_range(1..50),
@@ -460,7 +452,7 @@ mod tests {
         );
         let votes = vec![Vote::SucceededOnChain, Vote::SucceededOnChain];
 
-        let rand_addr: String = thread_rng()
+        let rand_addr: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(5)
             .map(char::from)

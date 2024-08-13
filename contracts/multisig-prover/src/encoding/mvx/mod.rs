@@ -138,8 +138,8 @@ impl TryFrom<&RouterMessage> for Message {
             <[u8; 32]>::try_from(addr_vec).map_err(|_| ContractError::InvalidMessage)?;
 
         Ok(Message {
-            source_chain: msg.cc_id.chain.to_string(),
-            message_id: msg.cc_id.id.to_string(),
+            source_chain: msg.cc_id.source_chain.to_string(),
+            message_id: msg.cc_id.message_id.to_string(),
             source_address: msg.source_address.to_string(),
             contract_address,
             payload_hash: msg.payload_hash,
@@ -172,7 +172,7 @@ pub fn ed25519_key(pub_key: &PublicKey) -> Result<[u8; 32], ContractError> {
     }
 }
 
-pub fn payload_hash_to_sign(
+pub fn payload_digest(
     domain_separator: &Hash,
     signer: &VerifierSet,
     payload: &Payload,
@@ -231,7 +231,7 @@ mod tests {
         verifier_set_from_pub_keys_ed25519,
     };
     use crate::{
-        encoding::mvx::{payload_hash_to_sign, Message, WeightedSigners},
+        encoding::mvx::{payload_digest, Message, WeightedSigners},
         payload::Payload,
     };
 
@@ -260,7 +260,7 @@ mod tests {
         ];
         let new_verifier_set = verifier_set_from_pub_keys_ed25519(new_pub_keys);
 
-        let msg_to_sign = payload_hash_to_sign(
+        let msg_to_sign = payload_digest(
             &domain_separator,
             &curr_verifier_set_ed25519(),
             &Payload::VerifierSet(new_verifier_set),
@@ -280,8 +280,8 @@ mod tests {
 
         let router_messages = RouterMessage {
             cc_id: CrossChainId {
-                chain: source_chain.parse().unwrap(),
-                id: message_id.parse().unwrap(),
+                source_chain: source_chain.parse().unwrap(),
+                message_id: message_id.parse().unwrap(),
             },
             source_address: source_address.parse().unwrap(),
             destination_address: destination_address.parse().unwrap(),
@@ -319,8 +319,8 @@ mod tests {
 
         let router_messages = RouterMessage {
             cc_id: CrossChainId {
-                chain: source_chain.parse().unwrap(),
-                id: message_id.parse().unwrap(),
+                source_chain: source_chain.parse().unwrap(),
+                message_id: message_id.parse().unwrap(),
             },
             source_address: source_address.parse().unwrap(),
             destination_address: destination_address.parse().unwrap(),
@@ -336,7 +336,7 @@ mod tests {
         assert!(gateway_message.is_err());
         assert_eq!(
             gateway_message.unwrap_err().to_string(),
-            axelar_wasm_std::ContractError::from(ContractError::InvalidMessage)
+            axelar_wasm_std::error::ContractError::from(ContractError::InvalidMessage)
             .to_string()
         );
     }
@@ -349,7 +349,7 @@ mod tests {
 
         let domain_separator = domain_separator_other();
 
-        let digest = payload_hash_to_sign(
+        let digest = payload_digest(
             &domain_separator,
             &curr_verifier_set_ed25519(),
             &Payload::Messages(messages_mvx()),
