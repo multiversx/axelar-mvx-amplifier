@@ -18,7 +18,7 @@ use crate::payload::Payload;
 pub enum Encoder {
     Abi,
     Bcs,
-    Mvx
+    Mvx,
 }
 
 impl Encoder {
@@ -55,7 +55,7 @@ impl Encoder {
                 &self.digest(domain_separator, verifier_set, payload)?,
                 payload,
             ),
-            Encoder::Mvx => mvx::execute_data::encode(verifier_set, sigs, payload)
+            Encoder::Mvx => mvx::execute_data::encode(verifier_set, sigs, payload),
         }
     }
 }

@@ -131,7 +131,7 @@ impl TryFrom<&RouterMessage> for Message {
     type Error = ContractError;
 
     fn try_from(msg: &RouterMessage) -> Result<Self, Self::Error> {
-        let (_, data, _) = bech32::decode(&msg.destination_address.as_str())
+        let (_, data, _) = bech32::decode(msg.destination_address.as_str())
             .map_err(|_| ContractError::InvalidMessage)?;
         let addr_vec = Vec::<u8>::from_base32(&data).map_err(|_| ContractError::InvalidMessage)?;
         let contract_address =
@@ -164,11 +164,9 @@ pub fn ed25519_key(pub_key: &PublicKey) -> Result<[u8; 32], ContractError> {
             return Ok(<[u8; 32]>::try_from(ed25519_key.as_ref())
                 .expect("couldn't convert pubkey to ed25519 public key"));
         }
-        _ => {
-            return Err(ContractError::InvalidPublicKey {
-                reason: "Public key is not ed25519".into(),
-            })
-        }
+        _ => Err(ContractError::InvalidPublicKey {
+            reason: "Public key is not ed25519".into(),
+        }),
     }
 }
 
@@ -336,8 +334,7 @@ mod tests {
         assert!(gateway_message.is_err());
         assert_eq!(
             gateway_message.unwrap_err().to_string(),
-            axelar_wasm_std::error::ContractError::from(ContractError::InvalidMessage)
-            .to_string()
+            axelar_wasm_std::error::ContractError::from(ContractError::InvalidMessage).to_string()
         );
     }
 
@@ -372,8 +369,7 @@ mod tests {
                 .unwrap()
         );
 
-        let mut weight = Vec::new();
-        weight.push(1u8);
+        let weight = vec![1u8];
 
         assert_eq!(weighted_signer.weight, weight);
     }

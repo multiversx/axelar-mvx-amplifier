@@ -12,6 +12,7 @@ pub struct Proof {
 }
 
 impl Proof {
+    #[allow(clippy::arithmetic_side_effects)]
     pub fn new(verifier_set: &VerifierSet, signers_with_sigs: Vec<SignerWithSig>) -> Self {
         let signers = WeightedSigners::from(verifier_set);
 
@@ -26,28 +27,25 @@ impl Proof {
 
         signers_with_sigs.sort_by_key(|signer| signer.0);
 
-        let mut signatures_index = 0;
-        let signatures = signers.signers.iter().map(|signer| {
-            let signer_with_sig = signers_with_sigs.get(signatures_index);
+        let mut signatures_index: usize = 0;
+        let signatures = signers
+            .signers
+            .iter()
+            .map(|signer| {
+                let signer_with_sig = signers_with_sigs.get(signatures_index)?;
 
-            if signer_with_sig.is_none() {
-                return None;
-            }
+                if signer.signer != signer_with_sig.0 {
+                    return None;
+                }
 
-            // Check if the current signer also has correct signature
-            // if not skip until correct signer is found
-            let signer_with_sig = signer_with_sig.unwrap();
-            if signer.signer != signer_with_sig.0 {
-                return None;
-            }
+                signatures_index += 1;
 
-            signatures_index += 1;
+                let signature = <[u8; 64]>::try_from(signer_with_sig.1.as_ref())
+                    .expect("couldn't convert signature to ed25519");
 
-            let signature = <[u8; 64]>::try_from(signer_with_sig.1.as_ref())
-                .expect("couldn't convert signature to ed25519");
-
-            Some(signature)
-        }).collect();
+                Some(signature)
+            })
+            .collect();
 
         Proof {
             signers,
@@ -256,25 +254,21 @@ mod tests {
         signers.next(); // Skip a signer
         let second_signer = signers.next().unwrap();
 
-        let mut signers_with_sigs = Vec::new();
-        signers_with_sigs.push(
+        let signers_with_sigs = vec![
             first_signer.with_sig(
                 Signature::try_from((KeyType::Ed25519, first_signature.clone())).unwrap(),
             ),
-        );
-
-        signers_with_sigs.push(
             second_signer.with_sig(
                 Signature::try_from((KeyType::Ed25519, second_signature.clone())).unwrap(),
             ),
-        );
+        ];
 
         let proof = Proof::new(&verifier_set, signers_with_sigs);
 
         assert!(proof.signers == WeightedSigners::from(&verifier_set));
         assert_eq!(proof.signatures.len(), 5);
         assert_eq!(
-            proof.signers.signers.get(0).unwrap().signer,
+            proof.signers.signers.first().unwrap().signer,
             second_signer.pub_key.as_ref()
         );
         assert_eq!(
@@ -283,9 +277,9 @@ mod tests {
         );
 
         // Only signatures corresponding to the signers are Some, rest are None
-        assert!(proof.signatures.get(0).unwrap().is_some());
+        assert!(proof.signatures.first().unwrap().is_some());
         assert_eq!(
-            proof.signatures.get(0).unwrap().unwrap(),
+            proof.signatures.first().unwrap().unwrap(),
             second_signature.as_slice()
         );
         assert!(proof.signatures.get(3).unwrap().is_some());
