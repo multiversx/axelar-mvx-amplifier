@@ -1,6 +1,6 @@
-pub mod abi;
-pub mod bcs;
-pub mod mvx;
+mod abi;
+mod bcs;
+mod mvx;
 
 use axelar_wasm_std::hash::Hash;
 use cosmwasm_schema::cw_serde;
