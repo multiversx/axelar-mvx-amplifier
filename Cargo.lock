@@ -270,7 +270,7 @@ dependencies = [
  "sha3",
  "sui-gateway",
  "sui-json-rpc-types",
- "sui-types",
+ "sui-types 0.1.0",
  "tendermint 0.33.0",
  "tendermint-rpc",
  "thiserror",
@@ -824,6 +824,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "strum 0.25.0",
+ "sui-types 1.0.0",
  "thiserror",
  "valuable",
 ]
@@ -6670,6 +6671,7 @@ dependencies = [
  "msgs-derive",
  "report",
  "router-api",
+ "serde_json",
  "thiserror",
 ]
 
@@ -7873,6 +7875,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha3",
+ "sui-types 1.0.0",
  "thiserror",
 ]
 
@@ -7890,7 +7893,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sui-types",
+ "sui-types 0.1.0",
 ]
 
 [[package]]
@@ -7918,7 +7921,7 @@ dependencies = [
  "sui-macros",
  "sui-package-resolver",
  "sui-protocol-config",
- "sui-types",
+ "sui-types 0.1.0",
  "tabled",
  "tracing",
 ]
@@ -7948,7 +7951,7 @@ dependencies = [
  "move-core-types",
  "serde",
  "sui-rest-api",
- "sui-types",
+ "sui-types 0.1.0",
  "thiserror",
  "tokio",
 ]
@@ -8005,7 +8008,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 2.3.3",
- "sui-types",
+ "sui-types 0.1.0",
  "tap",
  "thiserror",
 ]
@@ -8077,6 +8080,17 @@ dependencies = [
  "tonic 0.11.0",
  "tracing",
  "typed-store-error",
+]
+
+[[package]]
+name = "sui-types"
+version = "1.0.0"
+dependencies = [
+ "error-stack",
+ "hex",
+ "rand",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
