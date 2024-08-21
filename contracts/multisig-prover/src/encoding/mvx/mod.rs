@@ -122,7 +122,7 @@ impl From<&VerifierSet> for WeightedSigners {
         WeightedSigners {
             signers,
             threshold: uint256_to_compact_vec(verifier_set.threshold.into()),
-            nonce: Keccak256::digest(Uint256::from(verifier_set.created_at).to_be_bytes()).into(),
+            nonce: Uint256::from(verifier_set.created_at).to_be_bytes(),
         }
     }
 }
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn weight_signers_hash() {
         let expected_hash =
-            HexBinary::from_hex("839f6564c9008cfef529c02d98b5bddd6dfc34eaf1b263d57e6539575fb213a1")
+            HexBinary::from_hex("37cefe451c0fed773abe19dc01137fb8fda53a8ecae61dba6007dbc855130dac")
                 .unwrap();
         let verifier_set = curr_verifier_set_ed25519();
 
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn rotate_signers_message_hash() {
         let expected_hash =
-            HexBinary::from_hex("5779af336c539091e43557568010518a91459937f4ac2a46a99f67d06d3364f8")
+            HexBinary::from_hex("6674d491ac5635037341cbb1865ab39be9eaf8b1609e756919812b79efa95f40")
                 .unwrap();
 
         let domain_separator = domain_separator_other();
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn approve_messages_hash() {
         let expected_hash =
-            HexBinary::from_hex("0f9be71c5b8b7ab160552dfa59363ab4bafa2f80965822adb69595ee7d60afc7")
+            HexBinary::from_hex("2b8bdac0c65445d69b709eea15bf40c98bee7bf45d77eb54a1480c5078b2f77a")
                 .unwrap();
 
         let domain_separator = domain_separator_other();
