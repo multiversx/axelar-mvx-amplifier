@@ -1,5 +1,6 @@
 mod abi;
 mod bcs;
+mod stellar_xdr;
 mod mvx;
 
 use axelar_wasm_std::hash::Hash;
@@ -18,6 +19,7 @@ use crate::payload::Payload;
 pub enum Encoder {
     Abi,
     Bcs,
+    StellarXdr,
     Mvx,
 }
 
@@ -31,6 +33,9 @@ impl Encoder {
         match self {
             Encoder::Abi => abi::payload_digest(domain_separator, verifier_set, payload),
             Encoder::Bcs => bcs::payload_digest(domain_separator, verifier_set, payload),
+            Encoder::StellarXdr => {
+                stellar_xdr::payload_digest(domain_separator, verifier_set, payload)
+            }
             Encoder::Mvx => mvx::payload_digest(domain_separator, verifier_set, payload),
         }
     }
@@ -55,6 +60,7 @@ impl Encoder {
                 &self.digest(domain_separator, verifier_set, payload)?,
                 payload,
             ),
+            Encoder::StellarXdr => todo!(),
             Encoder::Mvx => mvx::execute_data::encode(verifier_set, sigs, payload),
         }
     }
@@ -68,6 +74,7 @@ where
     let recovery_transform = match encoder {
         Encoder::Abi => add_27,
         Encoder::Bcs => no_op,
+        Encoder::StellarXdr => no_op,
         Encoder::Mvx => no_op,
     };
     signers
