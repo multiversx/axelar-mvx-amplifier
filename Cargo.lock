@@ -804,6 +804,7 @@ version = "1.0.0"
 dependencies = [
  "alloy-primitives",
  "axelar-wasm-std-derive",
+ "bech32",
  "bs58 0.5.1",
  "cosmwasm-schema",
  "cosmwasm-std",
