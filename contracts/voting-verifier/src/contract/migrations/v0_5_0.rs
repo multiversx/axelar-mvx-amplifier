@@ -44,7 +44,7 @@ fn migrate_config(storage: &mut dyn Storage, config: Config) -> StdResult<()> {
         msg_id_format: config.msg_id_format,
         source_gateway_address: config.source_gateway_address,
         voting_threshold: config.voting_threshold,
-        address_format: AddressFormat::Eip55,
+        address_format: AddressFormat::Mvx,
     };
 
     state::CONFIG.save(storage, &config)

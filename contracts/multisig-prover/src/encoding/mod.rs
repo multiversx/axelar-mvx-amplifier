@@ -1,6 +1,7 @@
 mod abi;
 mod bcs;
 mod stellar_xdr;
+mod mvx;
 
 use axelar_wasm_std::hash::Hash;
 use cosmwasm_schema::cw_serde;
@@ -19,6 +20,7 @@ pub enum Encoder {
     Abi,
     Bcs,
     StellarXdr,
+    Mvx,
 }
 
 impl Encoder {
@@ -34,6 +36,7 @@ impl Encoder {
             Encoder::StellarXdr => {
                 stellar_xdr::payload_digest(domain_separator, verifier_set, payload)
             }
+            Encoder::Mvx => mvx::payload_digest(domain_separator, verifier_set, payload),
         }
     }
 
@@ -58,6 +61,7 @@ impl Encoder {
                 payload,
             ),
             Encoder::StellarXdr => todo!(),
+            Encoder::Mvx => mvx::execute_data::encode(verifier_set, sigs, payload),
         }
     }
 }
@@ -71,6 +75,7 @@ where
         Encoder::Abi => add_27,
         Encoder::Bcs => no_op,
         Encoder::StellarXdr => no_op,
+        Encoder::Mvx => no_op,
     };
     signers
         .into_iter()
