@@ -5,12 +5,16 @@ use cosmrs::proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmrs::proto::cosmos::tx::v1beta1::service_client::ServiceClient;
 use cosmrs::proto::Any;
 use cosmrs::AccountId;
-use error_stack::{Result, ResultExt};
+use error_stack::{report, FutureExt, Result, ResultExt};
+use futures::TryFutureExt;
 use serde::{Deserialize, Serialize};
+use tonic::transport::Channel;
 use valuable::Valuable;
 
+use crate::asyncutil::future::RetryPolicy;
+use crate::broadcaster::confirm_tx::TxConfirmer;
 use crate::broadcaster::Broadcaster;
-use crate::config::Config as AmpdConfig;
+use crate::config::{Config as AmpdConfig, Config};
 use crate::tofnd::grpc::{Multisig, MultisigClient};
 use crate::types::{PublicKey, TMAddress};
 use crate::{broadcaster, tofnd, Error, PREFIX};
@@ -22,6 +26,7 @@ pub mod deregister_chain_support;
 pub mod register_chain_support;
 pub mod register_public_key;
 pub mod send_tokens;
+pub mod set_rewards_proxy;
 pub mod unbond_verifier;
 pub mod verifier_address;
 
@@ -45,6 +50,8 @@ pub enum SubCommand {
     VerifierAddress,
     /// Send tokens from the verifier account to a specified address
     SendTokens(send_tokens::Args),
+    /// Set a proxy address to receive rewards, instead of receiving rewards at the verifier address
+    SetRewardsProxy(set_rewards_proxy::Args),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -53,6 +60,19 @@ pub struct ServiceRegistryConfig {
 }
 
 impl Default for ServiceRegistryConfig {
+    fn default() -> Self {
+        Self {
+            cosmwasm_contract: AccountId::new(PREFIX, &[0; 32]).unwrap().into(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub struct RewardsConfig {
+    pub cosmwasm_contract: TMAddress,
+}
+
+impl Default for RewardsConfig {
     fn default() -> Self {
         Self {
             cosmwasm_contract: AccountId::new(PREFIX, &[0; 32]).unwrap().into(),
@@ -75,13 +95,46 @@ async fn broadcast_tx(
     tx: Any,
     pub_key: PublicKey,
 ) -> Result<TxResponse, Error> {
+    let (confirmation_sender, mut confirmation_receiver) = tokio::sync::mpsc::channel(1);
+    let (hash_to_confirm_sender, hash_to_confirm_receiver) = tokio::sync::mpsc::channel(1);
+
+    let (mut broadcaster, confirmer) = instantiate_broadcaster(config, pub_key).await?;
+
+    broadcaster
+        .broadcast(vec![tx])
+        .change_context(Error::Broadcaster)
+        .and_then(|response| {
+            hash_to_confirm_sender
+                .send(response.txhash)
+                .change_context(Error::Broadcaster)
+        })
+        .await?;
+
+    // drop the sender so the confirmer doesn't wait for more txs
+    drop(hash_to_confirm_sender);
+
+    confirmer
+        .run(hash_to_confirm_receiver, confirmation_sender)
+        .change_context(Error::TxConfirmation)
+        .await?;
+
+    confirmation_receiver
+        .recv()
+        .await
+        .ok_or(report!(Error::TxConfirmation))
+        .map(|tx| tx.response)
+}
+
+async fn instantiate_broadcaster(
+    config: Config,
+    pub_key: PublicKey,
+) -> Result<(impl Broadcaster, TxConfirmer<ServiceClient<Channel>>), Error> {
     let AmpdConfig {
         tm_grpc,
         broadcast,
         tofnd_config,
         ..
     } = config;
-
     let service_client = ServiceClient::connect(tm_grpc.to_string())
         .await
         .change_context(Error::Connection)
@@ -99,7 +152,15 @@ async fn broadcast_tx(
         .change_context(Error::Connection)
         .attach_printable(tofnd_config.url)?;
 
-    broadcaster::UnvalidatedBasicBroadcaster::builder()
+    let confirmer = TxConfirmer::new(
+        service_client.clone(),
+        RetryPolicy::RepeatConstant {
+            sleep: broadcast.tx_fetch_interval,
+            max_attempts: broadcast.tx_fetch_max_retries.saturating_add(1).into(),
+        },
+    );
+
+    let basic_broadcaster = broadcaster::UnvalidatedBasicBroadcaster::builder()
         .client(service_client)
         .signer(multisig_client)
         .auth_query_client(auth_query_client)
@@ -110,8 +171,6 @@ async fn broadcast_tx(
         .build()
         .validate_fee_denomination()
         .await
-        .change_context(Error::Broadcaster)?
-        .broadcast(vec![tx])
-        .await
-        .change_context(Error::Broadcaster)
+        .change_context(Error::Broadcaster)?;
+    Ok((basic_broadcaster, confirmer))
 }

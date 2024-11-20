@@ -229,7 +229,7 @@ pub fn verifier_set_from_pub_keys(pub_keys: Vec<&str>) -> VerifierSet {
             )
         })
         .collect();
-    VerifierSet::new(participants, Uint128::from(3u128), 0)
+    VerifierSet::new(participants, Uint128::from(3u128), 1)
 }
 
 pub fn curr_verifier_set_ed25519() -> VerifierSet {

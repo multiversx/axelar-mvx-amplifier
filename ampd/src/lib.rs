@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use asyncutil::task::{CancellableTask, TaskError, TaskGroup};
 use block_height_monitor::BlockHeightMonitor;
-use broadcaster::confirm_tx::TxConfirmer;
 use broadcaster::Broadcaster;
 use cosmrs::proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmrs::proto::cosmos::bank::v1beta1::query_client::QueryClient as BankQueryClient;
@@ -12,7 +11,7 @@ use event_processor::EventHandler;
 use event_sub::EventSub;
 use evm::finalizer::{pick, Finalization};
 use evm::json_rpc::EthereumClient;
-use multiversx_sdk::blockchain::CommunicationProxy;
+use multiversx_sdk::gateway::GatewayProxy;
 use queue::queued_broadcaster::QueuedBroadcaster;
 use router_api::ChainName;
 use thiserror::Error;
@@ -41,6 +40,7 @@ mod health_check;
 mod json_rpc;
 mod mvx;
 mod queue;
+mod stellar;
 mod sui;
 mod tm_client;
 mod tofnd;
@@ -48,6 +48,9 @@ mod types;
 mod url;
 
 pub use grpc::{client, proto};
+
+use crate::asyncutil::future::RetryPolicy;
+use crate::broadcaster::confirm_tx::TxConfirmer;
 
 const PREFIX: &str = "axelar";
 const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(3);
@@ -65,6 +68,7 @@ async fn prepare_app(cfg: Config) -> Result<App<impl Broadcaster>, Error> {
         tofnd_config,
         event_processor,
         service_registry: _service_registry,
+        rewards: _rewards,
         health_check_bind_addr,
     } = cfg;
 
@@ -111,6 +115,21 @@ async fn prepare_app(cfg: Config) -> Result<App<impl Broadcaster>, Error> {
         .await
         .change_context(Error::Broadcaster)?;
 
+    let broadcaster = QueuedBroadcaster::new(
+        broadcaster,
+        broadcast.batch_gas_limit,
+        broadcast.queue_cap,
+        interval(broadcast.broadcast_interval),
+    );
+
+    let tx_confirmer = TxConfirmer::new(
+        service_client,
+        RetryPolicy::RepeatConstant {
+            sleep: broadcast.tx_fetch_interval,
+            max_attempts: broadcast.tx_fetch_max_retries.saturating_add(1).into(),
+        },
+    );
+
     let health_check_server = health_check::Server::new(health_check_bind_addr);
 
     let verifier: TMAddress = pub_key
@@ -121,9 +140,8 @@ async fn prepare_app(cfg: Config) -> Result<App<impl Broadcaster>, Error> {
     App::new(
         tm_client,
         broadcaster,
-        service_client,
+        tx_confirmer,
         multisig_client,
-        broadcast,
         event_processor.stream_buffer_size,
         block_height_monitor,
         health_check_server,
@@ -160,7 +178,6 @@ where
     multisig_client: MultisigClient,
     block_height_monitor: BlockHeightMonitor<tendermint_rpc::HttpClient>,
     health_check_server: health_check::Server,
-    token: CancellationToken,
 }
 
 impl<T> App<T>
@@ -170,38 +187,17 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         tm_client: tendermint_rpc::HttpClient,
-        broadcaster: T,
-        service_client: ServiceClient<Channel>,
+        broadcaster: QueuedBroadcaster<T>,
+        tx_confirmer: TxConfirmer<ServiceClient<Channel>>,
         multisig_client: MultisigClient,
-        broadcast_cfg: broadcaster::Config,
         event_buffer_cap: usize,
         block_height_monitor: BlockHeightMonitor<tendermint_rpc::HttpClient>,
         health_check_server: health_check::Server,
     ) -> Self {
-        let token = CancellationToken::new();
-
         let (event_publisher, event_subscriber) =
             event_sub::EventPublisher::new(tm_client, event_buffer_cap);
 
-        let (tx_confirmer_sender, tx_confirmer_receiver) = mpsc::channel(1000);
-        let (tx_res_sender, tx_res_receiver) = mpsc::channel(1000);
-
-        let event_processor = TaskGroup::new();
-        let broadcaster = QueuedBroadcaster::new(
-            broadcaster,
-            broadcast_cfg.batch_gas_limit,
-            broadcast_cfg.queue_cap,
-            interval(broadcast_cfg.broadcast_interval),
-            tx_confirmer_sender,
-            tx_res_receiver,
-        );
-        let tx_confirmer = TxConfirmer::new(
-            service_client,
-            broadcast_cfg.tx_fetch_interval,
-            broadcast_cfg.tx_fetch_max_retries.saturating_add(1),
-            tx_confirmer_receiver,
-            tx_res_sender,
-        );
+        let event_processor = TaskGroup::new("event handler");
 
         Self {
             event_publisher,
@@ -212,7 +208,6 @@ where
             multisig_client,
             block_height_monitor,
             health_check_server,
-            token,
         }
     }
 
@@ -343,7 +338,7 @@ where
                     handlers::mvx_verify_msg::Handler::new(
                         verifier.clone(),
                         cosmwasm_contract,
-                        CommunicationProxy::new(proxy_url.to_string().trim_end_matches('/').into()),
+                        GatewayProxy::new(proxy_url.to_string().trim_end_matches('/').into()),
                         self.block_height_monitor.latest_block_height(),
                     ),
                     event_processor_config.clone(),
@@ -356,7 +351,39 @@ where
                     handlers::mvx_verify_verifier_set::Handler::new(
                         verifier.clone(),
                         cosmwasm_contract,
-                        CommunicationProxy::new(proxy_url.to_string().trim_end_matches('/').into()),
+                        GatewayProxy::new(proxy_url.to_string().trim_end_matches('/').into()),
+                        self.block_height_monitor.latest_block_height(),
+                    ),
+                    event_processor_config.clone(),
+                ),
+                handlers::config::Config::StellarMsgVerifier {
+                    cosmwasm_contract,
+                    rpc_url,
+                } => self.create_handler_task(
+                    "stellar-msg-verifier",
+                    handlers::stellar_verify_msg::Handler::new(
+                        verifier.clone(),
+                        cosmwasm_contract,
+                        stellar::rpc_client::Client::new(
+                            rpc_url.to_string().trim_end_matches('/').into(),
+                        )
+                        .change_context(Error::Connection)?,
+                        self.block_height_monitor.latest_block_height(),
+                    ),
+                    event_processor_config.clone(),
+                ),
+                handlers::config::Config::StellarVerifierSetVerifier {
+                    cosmwasm_contract,
+                    rpc_url,
+                } => self.create_handler_task(
+                    "stellar-verifier-set-verifier",
+                    handlers::stellar_verify_verifier_set::Handler::new(
+                        verifier.clone(),
+                        cosmwasm_contract,
+                        stellar::rpc_client::Client::new(
+                            rpc_url.to_string().trim_end_matches('/').into(),
+                        )
+                        .change_context(Error::Connection)?,
                         self.block_height_monitor.latest_block_height(),
                     ),
                     event_processor_config.clone(),
@@ -394,6 +421,26 @@ where
         })
     }
 
+    fn create_broadcaster_task(
+        broadcaster: QueuedBroadcaster<T>,
+        confirmer: TxConfirmer<ServiceClient<Channel>>,
+    ) -> TaskGroup<Error> {
+        let (tx_hash_sender, tx_hash_receiver) = mpsc::channel(1000);
+        let (tx_response_sender, tx_response_receiver) = mpsc::channel(1000);
+
+        TaskGroup::new("broadcaster")
+            .add_task(CancellableTask::create(|_| {
+                confirmer
+                    .run(tx_hash_receiver, tx_response_sender)
+                    .change_context(Error::TxConfirmation)
+            }))
+            .add_task(CancellableTask::create(|_| {
+                broadcaster
+                    .run(tx_hash_sender, tx_response_receiver)
+                    .change_context(Error::Broadcaster)
+            }))
+    }
+
     async fn run(self) -> Result<(), Error> {
         let Self {
             event_publisher,
@@ -402,11 +449,11 @@ where
             tx_confirmer,
             block_height_monitor,
             health_check_server,
-            token,
             ..
         } = self;
 
-        let exit_token = token.clone();
+        let main_token = CancellationToken::new();
+        let exit_token = main_token.clone();
         tokio::spawn(async move {
             let mut sigint = signal(SignalKind::interrupt()).expect("failed to capture SIGINT");
             let mut sigterm = signal(SignalKind::terminate()).expect("failed to capture SIGTERM");
@@ -421,7 +468,7 @@ where
             exit_token.cancel();
         });
 
-        TaskGroup::new()
+        TaskGroup::new("ampd")
             .add_task(CancellableTask::create(|token| {
                 block_height_monitor
                     .run(token)
@@ -442,13 +489,10 @@ where
                     .run(token)
                     .change_context(Error::EventProcessor)
             }))
-            .add_task(CancellableTask::create(|_| {
-                tx_confirmer.run().change_context(Error::TxConfirmer)
+            .add_task(CancellableTask::create(|token| {
+                App::create_broadcaster_task(broadcaster, tx_confirmer).run(token)
             }))
-            .add_task(CancellableTask::create(|_| {
-                broadcaster.run().change_context(Error::Broadcaster)
-            }))
-            .run(token)
+            .run(main_token)
             .await
     }
 }
@@ -461,8 +505,8 @@ pub enum Error {
     EventProcessor,
     #[error("broadcaster failed")]
     Broadcaster,
-    #[error("tx confirmer failed")]
-    TxConfirmer,
+    #[error("tx confirmation failed")]
+    TxConfirmation,
     #[error("tofnd failed")]
     Tofnd,
     #[error("connection failed")]

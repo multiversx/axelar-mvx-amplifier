@@ -1,14 +1,13 @@
 [package]
 name = "rewards"
-version = "1.0.0"
+version = "1.2.0"
 rust-version = { workspace = true }
 edition = { workspace = true }
 description = "Validator rewards contract"
 
 exclude = [
-    # Those files are rust-optimizer artifacts. You might want to commit them for convenience, but they should not be part of the source code publication.
     "contract.wasm",
-    "hash.txt",
+    "hash.txt"
 ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -47,6 +46,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+assert_ok = { workspace = true }
 cw-multi-test = "0.15.1"
 
 [lints]
