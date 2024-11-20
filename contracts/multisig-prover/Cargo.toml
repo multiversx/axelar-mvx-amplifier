@@ -63,6 +63,8 @@ stellar-xdr = { workspace = true }
 sui-gateway = { workspace = true }
 thiserror = { workspace = true }
 voting-verifier = { workspace = true, features = ["library"] }
+multiversx-sc-codec = "0.19.0"
+bech32 = "0.9.1"
 
 [dev-dependencies]
 anyhow = "1.0"

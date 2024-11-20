@@ -18,6 +18,7 @@ pub enum Error {
 pub enum AddressFormat {
     Eip55,
     Sui,
+    Mvx,
     Stellar,
 }
 
@@ -30,6 +31,14 @@ pub fn validate_address(address: &str, format: &AddressFormat) -> Result<(), Err
         AddressFormat::Sui => {
             SuiAddress::from_str(address)
                 .change_context(Error::InvalidAddress(address.to_string()))?;
+        },
+        AddressFormat::Mvx => {
+            let (hre, _, _) = bech32::decode(address)
+                .map_err(|_| Error::InvalidAddress(address.to_string()))?;
+
+            if hre != "erd" {
+                return Err(Error::InvalidAddress(address.to_string()).into());
+            }
         }
         AddressFormat::Stellar => {
             if address != address.to_uppercase() {
@@ -133,6 +142,33 @@ mod tests {
             address::Error,
             address::Error::InvalidAddress(..)
         );
+    }
+
+    #[test]
+    fn validate_mvx_address() {
+        let addr = "erd1cux02zersde0l7hhklzhywcxk4u9n4py5tdxyx7vrvhnza2r4gmq4vw35r";
+
+        assert!(address::validate_address(addr, &address::AddressFormat::Mvx).is_ok());
+
+        let mixed_case = addr
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i % 2 == 0 {
+                    c.to_uppercase().next().unwrap()
+                } else {
+                    c
+                }
+                    .to_string()
+            })
+            .collect::<String>();
+        assert!(address::validate_address(&mixed_case, &address::AddressFormat::Mvx).is_err());
+
+        let invalid_length = format!("{}5f", addr);
+        assert!(address::validate_address(&invalid_length, &address::AddressFormat::Mvx).is_err());
+
+        let invalid_prefix = "bc1cux02zersde0l7hhklzhywcxk4u9n4py5tdxyx7vrvhnza2r4gmq4vw35r";
+        assert!(address::validate_address(&invalid_prefix, &address::AddressFormat::Mvx).is_err());
     }
 
     #[test]

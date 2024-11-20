@@ -837,6 +837,7 @@ dependencies = [
  "alloy-primitives",
  "assert_ok",
  "axelar-wasm-std-derive",
+ "bech32 0.9.1",
  "bs58 0.5.1",
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -5074,6 +5075,7 @@ dependencies = [
  "assert_ok",
  "axelar-wasm-std",
  "bcs",
+ "bech32 0.9.1",
  "client",
  "coordinator",
  "cosmwasm-schema",
@@ -5096,6 +5098,7 @@ dependencies = [
  "k256",
  "msgs-derive",
  "multisig",
+ "multiversx-sc-codec",
  "prost 0.12.6",
  "report",
  "router-api",
@@ -5108,6 +5111,16 @@ dependencies = [
  "sui-gateway",
  "thiserror",
  "voting-verifier",
+]
+
+[[package]]
+name = "multiversx-sc-codec"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35c94397b2fba14e40edfa55905b3f453ed57aa06c9b1960ad6a0ca6bfb7a236"
+dependencies = [
+ "arrayvec",
+ "unwrap-infallible",
 ]
 
 [[package]]
@@ -9361,6 +9374,12 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "unwrap-infallible"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "151ac09978d3c2862c4e39b557f4eceee2cc72150bc4cb4f16abf061b6e381fb"
 
 [[package]]
 name = "upon"
