@@ -78,18 +78,10 @@ impl NestedEncode for WeightedSigners {
 }
 
 impl WeightedSigners {
-    pub fn hash(&self) -> Hash {
-        let mut encoded = Vec::new();
+    pub fn hash(self) -> Result<Hash, ContractError> {
+        let encoded = self.encode()?;
 
-        for signer in self.signers.iter() {
-            encoded.push(signer.signer.as_slice());
-            encoded.push(signer.weight.as_slice());
-        }
-
-        encoded.push(self.threshold.as_slice());
-        encoded.push(self.nonce.as_slice());
-
-        Keccak256::digest(encoded.concat()).into()
+        Ok(Keccak256::digest(encoded).into())
     }
 
     pub fn encode(self) -> Result<Vec<u8>, ContractError> {
@@ -175,7 +167,7 @@ pub fn payload_digest(
     signer: &VerifierSet,
     payload: &Payload,
 ) -> error_stack::Result<Hash, ContractError> {
-    let signer_hash = WeightedSigners::from(signer).hash();
+    let signer_hash = WeightedSigners::from(signer).hash()?;
     let data_hash = Keccak256::digest(encode(payload)?);
 
     let unsigned = [
@@ -235,18 +227,19 @@ mod tests {
 
     #[test]
     fn weight_signers_hash() {
+        // This hash is generated externally using the MultiversX Gateway contract and is 100% correct
         let expected_hash =
-            HexBinary::from_hex("37cefe451c0fed773abe19dc01137fb8fda53a8ecae61dba6007dbc855130dac")
+            HexBinary::from_hex("7572504320753bc86bfd745f4710c916527b0c495dc5726f316ab742fe571fb0")
                 .unwrap();
         let verifier_set = curr_verifier_set_ed25519();
 
-        assert_eq!(WeightedSigners::from(&verifier_set).hash(), expected_hash);
+        assert_eq!(WeightedSigners::from(&verifier_set).hash().unwrap(), expected_hash);
     }
 
     #[test]
     fn rotate_signers_message_hash() {
         let expected_hash =
-            HexBinary::from_hex("6674d491ac5635037341cbb1865ab39be9eaf8b1609e756919812b79efa95f40")
+            HexBinary::from_hex("467fa5453ec40f8fbd2fa8f58a5863e08acf4398f52f5e038b6904deb88d4965")
                 .unwrap();
 
         let domain_separator = domain_separator_other();
@@ -341,7 +334,7 @@ mod tests {
     #[test]
     fn approve_messages_hash() {
         let expected_hash =
-            HexBinary::from_hex("2b8bdac0c65445d69b709eea15bf40c98bee7bf45d77eb54a1480c5078b2f77a")
+            HexBinary::from_hex("d0027520c4705225e42e83e6f516201b7b99879c94ef44d2a22d116160bbfeaf")
                 .unwrap();
 
         let domain_separator = domain_separator_other();
