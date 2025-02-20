@@ -59,7 +59,7 @@ impl Proof {
     }
 }
 
-pub fn encode(
+pub fn encode_execute_data(
     verifier_set: &VerifierSet,
     signers: Vec<SignerWithSig>,
     payload: &Payload,
@@ -120,7 +120,7 @@ mod tests {
         curr_verifier_set, curr_verifier_set_ed25519, messages_mvx,
         verifier_set_from_pub_keys_ed25519,
     };
-    use crate::{encoding::mvx::execute_data::encode, payload::Payload};
+    use crate::{encoding::mvx::execute_data::encode_execute_data, payload::Payload};
 
     #[test]
     fn rotate_signers_function_data() {
@@ -146,7 +146,7 @@ mod tests {
 
         let payload = Payload::VerifierSet(new_verifier_set);
 
-        let execute_data = encode(&verifier_set, signers_with_sigs, &payload).unwrap();
+        let execute_data = encode_execute_data(&verifier_set, signers_with_sigs, &payload).unwrap();
 
         // rotateSigners - name of function
         // @ - separator of data in MultiversX format
@@ -204,7 +204,7 @@ mod tests {
 
         let payload = Payload::Messages(messages_mvx());
 
-        let execute_data = encode(&verifier_set, signers_with_sigs, &payload).unwrap();
+        let execute_data = encode_execute_data(&verifier_set, signers_with_sigs, &payload).unwrap();
 
         // approveMessages - name of function
         // @ - separator of data in MultiversX format

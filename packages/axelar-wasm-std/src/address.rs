@@ -31,12 +31,12 @@ pub fn validate_address(address: &str, format: &AddressFormat) -> Result<(), Err
         AddressFormat::Sui => {
             SuiAddress::from_str(address)
                 .change_context(Error::InvalidAddress(address.to_string()))?;
-        },
+        }
         AddressFormat::Mvx => {
-            let (hre, _, _) = bech32::decode(address)
-                .map_err(|_| Error::InvalidAddress(address.to_string()))?;
+            let (hre, _, _) =
+                bech32::decode(address).map_err(|_| Error::InvalidAddress(address.to_string()))?;
 
-            if hre != "erd" {
+            if hre != "erd" || address.len() != 62 || address != address.to_lowercase() {
                 return Err(Error::InvalidAddress(address.to_string()).into());
             }
         }
@@ -159,7 +159,7 @@ mod tests {
                 } else {
                     c
                 }
-                    .to_string()
+                .to_string()
             })
             .collect::<String>();
         assert!(address::validate_address(&mixed_case, &address::AddressFormat::Mvx).is_err());
@@ -169,6 +169,12 @@ mod tests {
 
         let invalid_prefix = "bc1cux02zersde0l7hhklzhywcxk4u9n4py5tdxyx7vrvhnza2r4gmq4vw35r";
         assert!(address::validate_address(&invalid_prefix, &address::AddressFormat::Mvx).is_err());
+
+        let wrong_casing = "ERD1CUX02ZERSDE0L7HHKLZHYWCXK4U9N4PY5TDXYX7VRVHNZA2R4GMQ4VW35R";
+        assert!(address::validate_address(&wrong_casing, &address::AddressFormat::Mvx).is_err());
+
+        let wrong_length = "erdqcvpxy0cdv9w4xy6uuaf32luyj6xauyd6cuw6wv";
+        assert!(address::validate_address(&wrong_length, &address::AddressFormat::Mvx).is_err());
     }
 
     #[test]
