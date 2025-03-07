@@ -1,14 +1,14 @@
+use axelar_wasm_std::address::{validate_address, AddressFormat};
+use axelar_wasm_std::hash::Hash;
 use bech32::FromBase32;
 use cosmwasm_std::Uint256;
-use multiversx_sc_codec::top_encode_to_vec_u8;
-use multiversx_sc_codec::{EncodeErrorHandler, NestedEncode, NestedEncodeOutput};
-use sha3::{Digest, Keccak256};
-
-use axelar_wasm_std::hash::Hash;
 use multisig::key::PublicKey;
 use multisig::msg::Signer;
 use multisig::verifier_set::VerifierSet;
+use multiversx_sc_codec::top_encode_to_vec_u8;
+use multiversx_sc_codec::{EncodeErrorHandler, NestedEncode, NestedEncodeOutput};
 use router_api::Message as RouterMessage;
+use sha3::{Digest, Keccak256};
 
 use crate::error::ContractError;
 use crate::payload::Payload;
@@ -123,11 +123,15 @@ impl TryFrom<&RouterMessage> for Message {
     type Error = ContractError;
 
     fn try_from(msg: &RouterMessage) -> Result<Self, Self::Error> {
+        validate_address(&msg.destination_address.as_str(), &AddressFormat::Mvx)
+            .map_err(|_| ContractError::InvalidDestinationAddress)?;
+
         let (_, data, _) = bech32::decode(msg.destination_address.as_str())
-            .map_err(|_| ContractError::InvalidMessage)?;
-        let addr_vec = Vec::<u8>::from_base32(&data).map_err(|_| ContractError::InvalidMessage)?;
+            .map_err(|_| ContractError::InvalidDestinationAddress)?;
+        let addr_vec =
+            Vec::<u8>::from_base32(&data).map_err(|_| ContractError::InvalidDestinationAddress)?;
         let contract_address =
-            <[u8; 32]>::try_from(addr_vec).map_err(|_| ContractError::InvalidMessage)?;
+            <[u8; 32]>::try_from(addr_vec).map_err(|_| ContractError::InvalidDestinationAddress)?;
 
         Ok(Message {
             source_chain: msg.cc_id.source_chain.to_string(),
@@ -233,7 +237,10 @@ mod tests {
                 .unwrap();
         let verifier_set = curr_verifier_set_ed25519();
 
-        assert_eq!(WeightedSigners::from(&verifier_set).hash().unwrap(), expected_hash);
+        assert_eq!(
+            WeightedSigners::from(&verifier_set).hash().unwrap(),
+            expected_hash
+        );
     }
 
     #[test]
@@ -300,12 +307,12 @@ mod tests {
     }
 
     #[test]
-    fn router_message_to_gateway_message_error() {
+    fn router_message_to_gateway_message_destination_address_error() {
         let source_chain = "chain0";
         let message_id = "0xff822c88807859ff226b58e24f24974a70f04b9442501ae38fd665b3c68f3834-0";
         let source_address = "0x52444f1835Adc02086c37Cb226561605e2E1699b";
         let destination_chain = "chain1";
-        let destination_address = "0x52444f1835Adc02086c37Cb226561605e2E1699b";
+        let destination_address = "0x52444f1835Adc02086c37Cb226561605e2E1699b"; // wrong format
         let payload_hash = "8c3685dc41c2eca11426f8035742fb97ea9f14931152670a5703f18fe8b392f0";
 
         let router_messages = RouterMessage {
@@ -321,13 +328,41 @@ mod tests {
                 .to_array::<32>()
                 .unwrap(),
         };
-
         let gateway_message = Message::try_from(&router_messages);
 
         assert!(gateway_message.is_err());
         assert_eq!(
             gateway_message.unwrap_err().to_string(),
-            axelar_wasm_std::error::ContractError::from(ContractError::InvalidMessage).to_string()
+            axelar_wasm_std::error::ContractError::from(ContractError::InvalidDestinationAddress)
+                .to_string()
+        );
+
+        let destination_address = "ERD1CUX02ZERSDE0L7HHKLZHYWCXK4U9N4PY5TDXYX7VRVHNZA2R4GMQ4VW35R"; // wrong casing
+        let router_messages = RouterMessage {
+            destination_address: destination_address.parse().unwrap(),
+            ..router_messages
+        };
+        let gateway_message = Message::try_from(&router_messages);
+
+        assert!(gateway_message.is_err());
+        assert_eq!(
+            gateway_message.unwrap_err().to_string(),
+            axelar_wasm_std::error::ContractError::from(ContractError::InvalidDestinationAddress)
+                .to_string()
+        );
+
+        let destination_address = "erdqcvpxy0cdv9w4xy6uuaf32luyj6xauyd6cuw6wv"; // wrong length
+        let router_messages = RouterMessage {
+            destination_address: destination_address.parse().unwrap(),
+            ..router_messages
+        };
+        let gateway_message = Message::try_from(&router_messages);
+
+        assert!(gateway_message.is_err());
+        assert_eq!(
+            gateway_message.unwrap_err().to_string(),
+            axelar_wasm_std::error::ContractError::from(ContractError::InvalidDestinationAddress)
+                .to_string()
         );
     }
 
